@@ -1298,7 +1298,7 @@ mod tests {
 
 /// Used with `#[serde(default, skip_serializing_if = "is_default")]` for fields
 /// that don't need to be serialized if they are a default value.
-pub(crate) fn is_default<T: std::default::Default + Eq>(value: &T) -> bool {
+pub(crate) fn is_default<T: std::default::Default + PartialEq>(value: &T) -> bool {
     let default = T::default();
     *value == default
 }

@@ -18,31 +18,38 @@
 use super::*;
 use crate::prelude::*;
 
-use bevy_ecs::prelude::{In, Resource, Res, World};
+use bevy_ecs::{
+    prelude::{In, Resource, Res, World},
+    system::Command,
+};
 use bevy_derive::{Deref, DerefMut};
 use ::zenoh::{
-    sample::Locality,
-    Session, sample::Sample,
+    Session,
+    bytes::ZBytes,
+    sample::{Locality, Sample},
+    qos::{CongestionControl, Priority},
 };
 use zenoh_ext::{
     AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig,
-    HistoryConfig, RecoveryConfig,
+    HistoryConfig, RecoveryConfig, RepliesConfig, MissDetectionConfig,
     z_deserialize,
 };
 use std::{
     error::Error,
     time::Duration,
     future::Future,
+    sync::Mutex,
 };
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use futures::future::Shared;
 use futures_lite::future::race;
 use thiserror::Error as ThisError;
-use prost_reflect::{DynamicMessage, MessageDescriptor, DescriptorPool, SerializeOptions};
+use prost_reflect::{DynamicMessage, MessageDescriptor, DescriptorPool, SerializeOptions, prost::Message};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ZenohSubscriptionConfig {
+    /// The key that this subscription will use to connect to publishers.
     pub key: Arc<str>,
     #[serde(default, skip_serializing_if = "ZenohSubscriptionHistoryConfig::is_default")]
     pub history: ZenohSubscriptionHistoryConfig,
@@ -50,8 +57,8 @@ pub struct ZenohSubscriptionConfig {
     pub recovery: ZenohSubscriptionRecoveryConfig,
     #[serde(default, skip_serializing_if = "is_default")]
     pub locality: LocalityConfig,
-    #[serde(default, skip_serializing_if = "PayloadConfig::is_json")]
-    pub payload: PayloadConfig,
+    #[serde(default, skip_serializing_if = "EncodingConfig::is_json")]
+    pub encoding: EncodingConfig,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -63,9 +70,9 @@ pub struct ZenohSubscriptionHistoryConfig {
     /// Specify how many samples to query for each resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_samples: Option<usize>,
-    /// Specify the maximum age (in seconds) of samples to query.
+    /// Specify the maximum age of samples to query.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_age: Option<f64>,
+    pub max_age: Option<Duration>,
 }
 
 impl From<ZenohSubscriptionHistoryConfig> for HistoryConfig {
@@ -79,8 +86,8 @@ impl From<ZenohSubscriptionHistoryConfig> for HistoryConfig {
             config = config.max_samples(depth);
         }
 
-        if let Some(seconds) = value.max_age {
-            config = config.max_age(seconds);
+        if let Some(duration) = value.max_age {
+            config = config.max_age(duration.as_secs_f64());
         }
 
         config
@@ -104,6 +111,151 @@ impl Default for ZenohSubscriptionRecoveryConfig {
     fn default() -> Self {
         ZenohSubscriptionRecoveryConfig::Heartbeat
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ZenohPublisherConfig {
+    /// The key that this publisher will use to advertise itself.
+    pub key: Arc<str>,
+    /// Maximum number of samples that will be kept for late joiners or
+    /// subscriptions that missed a sample. If unset it will use Zenoh's default
+    /// which is 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_samples: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub heartbeat: ZenohPublisherHeartbeatOption,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority: ZenohPublisherPriority,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub congestion_control: ZenohPublisherCongestionControl,
+    /// When express is set to true, messages will not be batched.
+    /// This usually has a positive impact on latency but negative impact on throughput.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub express: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub reliability: ZenohPublisherReliability,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub locality: LocalityConfig,
+    #[serde(default, skip_serializing_if = "EncodingConfig::is_json")]
+    pub encoding: EncodingConfig,
+}
+
+impl ZenohPublisherConfig {
+    pub fn cache_config(&self) -> CacheConfig {
+        let mut cache = CacheConfig::default()
+            .replies_config(self.replies_config());
+
+        if let Some(depth) = self.max_samples {
+            cache = cache.max_samples(depth);
+        }
+
+        cache
+    }
+
+    pub fn replies_config(&self) -> RepliesConfig {
+        RepliesConfig::default()
+            .congestion_control(self.congestion_control.into())
+            .priority(self.priority.into())
+            .express(self.express)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case", untagged)]
+pub enum ZenohPublisherHeartbeatOption {
+    /// Disable the heartbeat functionality
+    Disable,
+    /// Enable the heartbeat
+    Enable(ZenohPublisherHeartbeatConfig),
+}
+
+impl Default for ZenohPublisherHeartbeatOption {
+    fn default() -> Self {
+        Self::Enable(Default::default())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ZenohPublisherHeartbeatConfig {
+    /// How frequently should the heartbeat be published?
+    pub period: Duration,
+    /// Is a sporadic heartbeat allowed? A sporadic heartbeat means the
+    /// heartbeat will only be published if the publisher's sequence number has
+    /// increased within the latest heartbeat period. This means subscriptions
+    /// that missed a message might not know until the next time a message gets
+    /// published.
+    pub sporadic: bool,
+}
+
+impl Default for ZenohPublisherHeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            period: Duration::from_secs(1),
+            sporadic: false,
+        }
+    }
+}
+
+impl From<ZenohPublisherHeartbeatConfig> for MissDetectionConfig {
+    fn from(value: ZenohPublisherHeartbeatConfig) -> Self {
+        if value.sporadic {
+            MissDetectionConfig::default().heartbeat(value.period)
+        } else {
+            MissDetectionConfig::default().sporadic_heartbeat(value.period)
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohPublisherPriority {
+    RealTime,
+    InteractiveHigh,
+    InteractiveLow,
+    DataHigh,
+    #[default]
+    Data,
+    DataLow,
+    Background,
+}
+
+impl From<ZenohPublisherPriority> for Priority {
+    fn from(value: ZenohPublisherPriority) -> Self {
+        match value {
+            ZenohPublisherPriority::RealTime => Self::RealTime,
+            ZenohPublisherPriority::InteractiveHigh => Self::InteractiveHigh,
+            ZenohPublisherPriority::InteractiveLow => Self::InteractiveLow,
+            ZenohPublisherPriority::DataHigh => Self::DataHigh,
+            ZenohPublisherPriority::Data => Self::Data,
+            ZenohPublisherPriority::DataLow => Self::DataLow,
+            ZenohPublisherPriority::Background => Self::Background,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohPublisherCongestionControl {
+    #[default]
+    Drop,
+    Block,
+}
+
+impl From<ZenohPublisherCongestionControl> for CongestionControl {
+    fn from(value: ZenohPublisherCongestionControl) -> Self {
+        match value {
+            ZenohPublisherCongestionControl::Block => Self::Block,
+            ZenohPublisherCongestionControl::Drop => Self::Drop,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohPublisherReliability {
+    BestEffort,
+    #[default]
+    Reliable,
 }
 
 /// We need the JsonSchema trait for the config struct, so we need to redefine
@@ -137,7 +289,7 @@ impl ZenohSubscriptionHistoryConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PayloadConfig {
+pub enum EncodingConfig {
     /// Interpret the payload as a JSON value, serialized as a string
     Json,
     /// Interpret the payload as the serialized bytes of the specified type of protobuf message
@@ -146,13 +298,13 @@ pub enum PayloadConfig {
     Bson,
 }
 
-impl PayloadConfig {
+impl EncodingConfig {
     pub fn is_json(&self) -> bool {
         matches!(self, Self::Json)
     }
 }
 
-impl Default for PayloadConfig {
+impl Default for EncodingConfig {
     fn default() -> Self {
         Self::Json
     }
@@ -182,36 +334,41 @@ pub enum ZenohSubscriptionError {
     ZenohError(#[from] ArcError),
 }
 
+#[derive(ThisError, Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohPublisherError {
+    #[error("the zenoh session was removed from its resource")]
+    SessionRemoved,
+    #[error("error while encoding message: {}", .0)]
+    EncodingError(String),
+    #[error("{}", .0)]
+    ZenohError(#[from] ArcError),
+}
+
 #[derive(ThisError, Debug)]
-pub enum ZenohSubscriptionBuildError {
+pub enum ZenohBuildError {
     #[error("cannot find protobuf message descriptor for [{}]", .0)]
     MissingMessageDescriptor(Arc<str>),
 }
 
 impl DiagramElementRegistry {
-    pub fn enable_zenoh(&mut self) {
+    pub fn enable_zenoh(&mut self, zenoh_session_config: ::zenoh::Config) {
+        let ensure_session = EnsureZenohSession::new(zenoh_session_config);
+
+        let ensure_session_for_subscription = ensure_session.clone();
         self
             .opt_out()
             .no_deserializing()
             .register_node_builder_fallible(
                 NodeBuilderOptions::new("zenoh_subscription")
                     .with_default_display_text("Zenoh Subscription"),
-                |builder, config: ZenohSubscriptionConfig| {
+                move |builder, config: ZenohSubscriptionConfig| {
+                    builder.commands().add(ensure_session_for_subscription.clone());
+
                     let active_buffer = builder.create_buffer::<()>(BufferSettings::default());
                     let access = builder.create_buffer_access::<(), _>(active_buffer);
 
-                    let decoder = match &config.payload {
-                        PayloadConfig::Protobuf(message_type) => {
-                            let descriptors = DescriptorPool::global();
-                            let Some(msg) = descriptors.get_message_by_name(&message_type) else {
-                                return Err(ZenohSubscriptionBuildError::MissingMessageDescriptor(Arc::clone(&message_type)).into());
-                            };
-
-                            Decoder::Protobuf(msg)
-                        }
-                        PayloadConfig::Json => Decoder::Json,
-                        PayloadConfig::Bson => Decoder::Bson,
-                    };
+                    let decoder: Codec = (&config.encoding).try_into()?;
 
                     let callback = move |
                         In(input): AsyncCallbackInput<((), BufferKey<()>), ZenohSubscriptionStreams>,
@@ -343,6 +500,73 @@ impl DiagramElementRegistry {
             )
             .with_fork_result();
 
+        let create_publisher = |
+            In(config): In<ZenohPublisherConfig>,
+            session: Res<ZenohSession>,
+        | {
+            let session_promise = session.promise.clone();
+            async move {
+                let session = session_promise
+                    .await
+                    .available()
+                    .map(|r| r.map_err(ZenohPublisherError::ZenohError))
+                    .unwrap_or(Err(ZenohPublisherError::SessionRemoved))?;
+
+                let publisher = session
+                    .declare_publisher(config.key.to_string())
+                    .cache(config.cache_config())
+                    .publisher_detection();
+
+                let publisher = match config.heartbeat {
+                    ZenohPublisherHeartbeatOption::Disable => publisher,
+                    ZenohPublisherHeartbeatOption::Enable(heartbeat) => {
+                        publisher.sample_miss_detection(heartbeat.into())
+                    }
+                };
+
+                let publisher = publisher
+                    .await
+                    .map_err(ArcError::new)?;
+
+                Ok::<_, ZenohPublisherError>(Arc::new(publisher))
+            }
+        };
+        let create_publisher = create_publisher.into_async_callback();
+
+        self
+            .opt_out()
+            .no_deserializing()
+            .register_node_builder_fallible(
+                NodeBuilderOptions::new("zenoh_publisher")
+                    .with_default_display_text("Zenoh Publisher"),
+                move |builder, config: ZenohPublisherConfig| {
+                    builder.commands().add(ensure_session.clone());
+
+                    let encoder: Codec = (&config.encoding).try_into()?;
+                    let publisher = builder.commands().request(config, create_publisher.clone()).take_response();
+                    let publisher = publisher.shared();
+
+                    let callback = move |message: JsonMessage| {
+                        let publisher = publisher.clone();
+                        let encoder = encoder.clone();
+                        async move {
+                            let payload = encoder
+                                .encode(message)
+                                .map_err(ZenohPublisherError::EncodingError)?;
+
+                            // SAFETY: There is no mechanism for the publisher to
+                            // be taken out of the promise, so it should always be
+                            // available after being awaited.
+                            let publisher = publisher.await.available().unwrap()?;
+                            publisher.put(payload).await.map_err(ArcError::new)?;
+                            Ok::<_, ZenohPublisherError>(())
+                        }
+                    };
+
+                    Ok(builder.create_map_async(callback))
+                }
+            );
+
         // TODO(@mxgrey): Support dynamic connections whose configurations are
         // decided within the workflow and passed into the node as input.
     }
@@ -386,6 +610,37 @@ pub struct ZenohSession {
     pub promise: Shared<Promise<Result<Session, ArcError>>>,
 }
 
+#[derive(Clone)]
+struct EnsureZenohSession(Arc<Mutex<Option<::zenoh::Config>>>);
+
+impl EnsureZenohSession {
+    fn new(config: ::zenoh::Config) -> Self {
+        Self(Arc::new(Mutex::new(Some(config))))
+    }
+}
+
+impl Command for EnsureZenohSession {
+    fn apply(self, world: &mut World) {
+        let Some(config) = self.0.lock().unwrap().take() else {
+            return;
+        };
+
+        let promise = world
+            .command(|commands| {
+                commands
+                    .serve(async {
+                        ::zenoh::open(config)
+                        .await
+                        .map_err(ArcError::new)
+                    })
+                    .take_response()
+            })
+            .shared();
+
+        world.insert_resource(ZenohSession { promise });
+    }
+}
+
 async fn receive_cancel<T>(
     receiver: impl Future<Output = Option<JsonMessage>>,
 ) -> Result<Result<T, JsonMessage>, ZenohSubscriptionError> {
@@ -403,22 +658,42 @@ async fn receive_cancel<T>(
 }
 
 #[derive(Debug, Clone)]
-enum Decoder {
+enum Codec {
     Protobuf(MessageDescriptor),
     Json,
     Bson,
 }
 
-impl Decoder {
+impl Codec {
+    fn encode(&self, message: JsonMessage) -> Result<ZBytes, String> {
+        match self {
+            Codec::Protobuf(descriptor) => {
+                let msg = DynamicMessage::deserialize(descriptor.clone(), message)
+                    .map_err(|err| format!("{err}"))?;
+
+                Ok(ZBytes::from(msg.encode_to_vec()))
+            }
+            Codec::Json => {
+                let msg_as_string: String = serde_json::from_value(message)
+                    .map_err(|err| format!("{err}"))?;
+
+                Ok(ZBytes::from(msg_as_string))
+            }
+            Codec::Bson => {
+                let bytes = bson::serialize_to_vec(&message).map_err(|err| format!("{err}"))?;
+                Ok(ZBytes::from(bytes))
+            }
+        }
+    }
+
     fn decode(&self, sample: Sample) -> Result<JsonMessage, String> {
         match self {
-            Decoder::Protobuf(descriptor) => {
-                let msg = match DynamicMessage::decode(descriptor.clone(), sample.payload().to_bytes().as_ref()) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        return Err(format!("{err}"));
-                    }
-                };
+            Codec::Protobuf(descriptor) => {
+                let msg = DynamicMessage::decode(
+                    descriptor.clone(),
+                    sample.payload().to_bytes().as_ref(),
+                )
+                .map_err(|err| format!("{err}"))?;
 
                 // TODO(@mxgrey): Refactor this to share an implementation with
                 // the decoder in the grpc feature
@@ -440,7 +715,7 @@ impl Decoder {
                     }
                 }
             }
-            Decoder::Json => {
+            Codec::Json => {
                 let payload: String = match z_deserialize(sample.payload()) {
                     Ok(payload) => payload,
                     Err(err) => {
@@ -457,7 +732,7 @@ impl Decoder {
                     }
                 };
             }
-            Decoder::Bson => {
+            Codec::Bson => {
                 match bson::deserialize_from_slice::<JsonMessage>(sample.payload().to_bytes().as_ref()) {
                     Ok(msg) => {
                         return Ok(msg);
@@ -467,6 +742,24 @@ impl Decoder {
                     }
                 }
             }
+        }
+    }
+}
+
+impl TryFrom<&'_ EncodingConfig> for Codec {
+    type Error = ZenohBuildError;
+    fn try_from(value: &EncodingConfig) -> Result<Self, Self::Error> {
+        match value {
+            EncodingConfig::Protobuf(message_type) => {
+                let descriptors = DescriptorPool::global();
+                let Some(msg) = descriptors.get_message_by_name(&message_type) else {
+                    return Err(ZenohBuildError::MissingMessageDescriptor(Arc::clone(&message_type)).into());
+                };
+
+                Ok(Codec::Protobuf(msg))
+            }
+            EncodingConfig::Json => Ok(Codec::Json),
+            EncodingConfig::Bson => Ok(Codec::Bson),
         }
     }
 }
