@@ -19,8 +19,9 @@ use super::*;
 use crate::prelude::*;
 
 use ::zenoh::{
-    bytes::ZBytes,
+    bytes::{Encoding, ZBytes},
     qos::{CongestionControl, Priority},
+    query::{QueryConsolidation, ConsolidationMode, QueryTarget, Parameters},
     sample::{Locality, Sample},
     Session,
 };
@@ -47,6 +48,8 @@ use zenoh_ext::{
 pub struct ZenohSubscriptionConfig {
     /// The key that this subscription will use to connect to publishers.
     pub key: Arc<str>,
+    /// The encoding of incoming messages.
+    pub decoder: ZenohEncodingConfig,
     #[serde(
         default,
         skip_serializing_if = "ZenohSubscriptionHistoryConfig::is_default"
@@ -55,9 +58,7 @@ pub struct ZenohSubscriptionConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub recovery: ZenohSubscriptionRecoveryConfig,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub locality: LocalityConfig,
-    #[serde(default, skip_serializing_if = "EncodingConfig::is_json")]
-    pub encoding: EncodingConfig,
+    pub locality: ZenohLocalityConfig,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -116,6 +117,8 @@ impl Default for ZenohSubscriptionRecoveryConfig {
 pub struct ZenohPublisherConfig {
     /// The key that this publisher will use to advertise itself.
     pub key: Arc<str>,
+    /// How outgoing messages will be encoded.
+    pub encoder: ZenohEncodingConfig,
     /// Maximum number of samples that will be kept for late joiners or
     /// subscriptions that missed a sample. If unset it will use Zenoh's default
     /// which is 1.
@@ -124,9 +127,9 @@ pub struct ZenohPublisherConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub heartbeat: ZenohPublisherHeartbeatOption,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub priority: ZenohPublisherPriority,
+    pub priority: ZenohPriorityConfig,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub congestion_control: ZenohPublisherCongestionControl,
+    pub congestion_control: ZenohCongestionControlConfig,
     /// When express is set to true, messages will not be batched.
     /// This usually has a positive impact on latency but negative impact on throughput.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -134,9 +137,7 @@ pub struct ZenohPublisherConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub reliability: ZenohPublisherReliability,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub locality: LocalityConfig,
-    #[serde(default, skip_serializing_if = "EncodingConfig::is_json")]
-    pub encoding: EncodingConfig,
+    pub locality: ZenohLocalityConfig,
 }
 
 impl ZenohPublisherConfig {
@@ -206,7 +207,7 @@ impl From<ZenohPublisherHeartbeatConfig> for MissDetectionConfig {
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ZenohPublisherPriority {
+pub enum ZenohPriorityConfig {
     RealTime,
     InteractiveHigh,
     InteractiveLow,
@@ -217,33 +218,33 @@ pub enum ZenohPublisherPriority {
     Background,
 }
 
-impl From<ZenohPublisherPriority> for Priority {
-    fn from(value: ZenohPublisherPriority) -> Self {
+impl From<ZenohPriorityConfig> for Priority {
+    fn from(value: ZenohPriorityConfig) -> Self {
         match value {
-            ZenohPublisherPriority::RealTime => Self::RealTime,
-            ZenohPublisherPriority::InteractiveHigh => Self::InteractiveHigh,
-            ZenohPublisherPriority::InteractiveLow => Self::InteractiveLow,
-            ZenohPublisherPriority::DataHigh => Self::DataHigh,
-            ZenohPublisherPriority::Data => Self::Data,
-            ZenohPublisherPriority::DataLow => Self::DataLow,
-            ZenohPublisherPriority::Background => Self::Background,
+            ZenohPriorityConfig::RealTime => Self::RealTime,
+            ZenohPriorityConfig::InteractiveHigh => Self::InteractiveHigh,
+            ZenohPriorityConfig::InteractiveLow => Self::InteractiveLow,
+            ZenohPriorityConfig::DataHigh => Self::DataHigh,
+            ZenohPriorityConfig::Data => Self::Data,
+            ZenohPriorityConfig::DataLow => Self::DataLow,
+            ZenohPriorityConfig::Background => Self::Background,
         }
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ZenohPublisherCongestionControl {
+pub enum ZenohCongestionControlConfig {
     #[default]
     Drop,
     Block,
 }
 
-impl From<ZenohPublisherCongestionControl> for CongestionControl {
-    fn from(value: ZenohPublisherCongestionControl) -> Self {
+impl From<ZenohCongestionControlConfig> for CongestionControl {
+    fn from(value: ZenohCongestionControlConfig) -> Self {
         match value {
-            ZenohPublisherCongestionControl::Block => Self::Block,
-            ZenohPublisherCongestionControl::Drop => Self::Drop,
+            ZenohCongestionControlConfig::Block => Self::Block,
+            ZenohCongestionControlConfig::Drop => Self::Drop,
         }
     }
 }
@@ -256,23 +257,113 @@ pub enum ZenohPublisherReliability {
     Reliable,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ZenohQuerierConfig {
+    /// The key of the query
+    pub key: Arc<str>,
+    /// How outgoing queries will be encoded.
+    pub encoder: ZenohEncodingConfig,
+    /// How incoming responses will be decoded.
+    pub decoder: ZenohEncodingConfig,
+    /// Key/value parameters for the
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub parameters: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub congestion_control: ZenohCongestionControlConfig,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub priority: ZenohPriorityConfig,
+    /// When express is set to true, messages will not be batched.
+    /// This usually has a positive impact on latency but negative impact on throughput.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub express: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub target: ZenohQueryTargetConfig,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub consolidation: ZenohQueryConsolidationModeConfig,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub locality: ZenohLocalityConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<Duration>,
+    /// If true, the replies that are sent through the out-stream will be a
+    /// JSON Object with two fields: `replier_id` and `payload`.
+    ///
+    /// If false (default), the data sent through the out-stream will only
+    /// contain the payload.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub include_replier_id: bool,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohQueryConsolidationModeConfig {
+    /// Apply automatic consolidation based on queryable's preferences
+    #[default]
+    Auto,
+    /// No consolidation applied: multiple samples may be received for the same key-timestamp.
+    None,
+    /// Monotonic consolidation immediately forwards samples, except if one with an equal or more recent timestamp
+    /// has already been sent with the same key.
+    ///
+    /// This optimizes latency while potentially reducing bandwidth.
+    ///
+    /// Note that this doesn't cause re-ordering, but drops the samples for which a more recent timestamp has already
+    /// been observed with the same key.
+    Monotonic,
+    /// Holds back samples to only send the set of samples that had the highest timestamp for their key.
+    Latest,
+}
+
+impl From<ZenohQueryConsolidationModeConfig> for QueryConsolidation {
+    fn from(value: ZenohQueryConsolidationModeConfig) -> Self {
+        let mode = match value {
+            ZenohQueryConsolidationModeConfig::Auto => ConsolidationMode::Auto,
+            ZenohQueryConsolidationModeConfig::None => ConsolidationMode::None,
+            ZenohQueryConsolidationModeConfig::Monotonic => ConsolidationMode::Monotonic,
+            ZenohQueryConsolidationModeConfig::Latest => ConsolidationMode::Latest,
+        };
+        mode.into()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohQueryTargetConfig {
+    /// Let Zenoh find the BestMatching queryable capabale of serving the query.
+    #[default]
+    BestMatching,
+    /// Deliver the query to all queryables matching the query's key expression.
+    All,
+    /// Deliver the query to all queryables matching the query's key expression that are declared as complete.
+    AllComplete,
+}
+
+impl From<ZenohQueryTargetConfig> for QueryTarget {
+    fn from(value: ZenohQueryTargetConfig) -> Self {
+        match value {
+            ZenohQueryTargetConfig::BestMatching => QueryTarget::BestMatching,
+            ZenohQueryTargetConfig::All => QueryTarget::All,
+            ZenohQueryTargetConfig::AllComplete => QueryTarget::AllComplete,
+        }
+    }
+}
+
 /// We need the JsonSchema trait for the config struct, so we need to redefine
 /// this enum from zenoh.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LocalityConfig {
+pub enum ZenohLocalityConfig {
     SessionLocal,
     Remote,
     #[default]
     Any,
 }
 
-impl From<LocalityConfig> for Locality {
-    fn from(value: LocalityConfig) -> Self {
+impl From<ZenohLocalityConfig> for Locality {
+    fn from(value: ZenohLocalityConfig) -> Self {
         match value {
-            LocalityConfig::SessionLocal => Locality::SessionLocal,
-            LocalityConfig::Remote => Locality::Remote,
-            LocalityConfig::Any => Locality::Any,
+            ZenohLocalityConfig::SessionLocal => Locality::SessionLocal,
+            ZenohLocalityConfig::Remote => Locality::Remote,
+            ZenohLocalityConfig::Any => Locality::Any,
         }
     }
 }
@@ -285,7 +376,7 @@ impl ZenohSubscriptionHistoryConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum EncodingConfig {
+pub enum ZenohEncodingConfig {
     /// Interpret the payload as a JSON value, serialized as a string
     Json,
     /// Interpret the payload as the serialized bytes of the specified type of protobuf message
@@ -294,26 +385,14 @@ pub enum EncodingConfig {
     Bson,
 }
 
-impl EncodingConfig {
-    pub fn is_json(&self) -> bool {
-        matches!(self, Self::Json)
-    }
-}
-
-impl Default for EncodingConfig {
-    fn default() -> Self {
-        Self::Json
-    }
-}
-
 #[derive(StreamPack)]
-pub struct ZenohSubscriptionStreams {
-    /// Messages that come out of the subscription
+pub struct ZenohNodeStreams {
+    /// Messages that come out of the subscription or query
     pub out: JsonMessage,
-    /// Error message that will be produced if an error occurs while decoding a
+    /// Error messages that are produced if an error occurs while decoding a
     /// payload
     pub out_error: String,
-    /// A way to cancel the subscription
+    /// A way to cancel the subscription or query
     pub canceller: UnboundedSender<JsonMessage>,
 }
 
@@ -333,6 +412,17 @@ pub enum ZenohSubscriptionError {
 #[derive(ThisError, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ZenohPublisherError {
+    #[error("the zenoh session was removed from its resource")]
+    SessionRemoved,
+    #[error("error while encoding message: {}", .0)]
+    EncodingError(String),
+    #[error("{}", .0)]
+    ZenohError(#[from] ArcError),
+}
+
+#[derive(ThisError, Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohQuerierError {
     #[error("the zenoh session was removed from its resource")]
     SessionRemoved,
     #[error("error while encoding message: {}", .0)]
@@ -363,11 +453,11 @@ impl DiagramElementRegistry {
                 let active_buffer = builder.create_buffer::<()>(BufferSettings::default());
                 let access = builder.create_buffer_access::<(), _>(active_buffer);
 
-                let decoder: Codec = (&config.encoding).try_into()?;
+                let decoder: Codec = (&config.decoder).try_into()?;
 
                 let callback = move |In(input): AsyncCallbackInput<
                     ((), BufferKey<()>),
-                    ZenohSubscriptionStreams,
+                    ZenohNodeStreams,
                 >,
                                      mut active: BufferAccessMut<()>,
                                      session: Res<ZenohSession>| {
@@ -395,11 +485,20 @@ impl DiagramElementRegistry {
                         // Return right away if the subscription is already active
                         already_active?;
 
-                        let cancel = receiver.recv().shared();
+                        let cancel = receiver.recv();
 
                         let active_key = input.request.1;
+
+                        // Capture all the activity of the subscribing and
+                        // cancelling inside this block so we have a convenient
+                        // way to catch errors. We want to make sure we clean up
+                        // the buffer before fully exiting the node implementation,
+                        // and we don't want any errors to short-circuit that cleanup.
                         let r = async move {
-                            let subscription_future = async move {
+                            // Capture all activity related to subscribing in
+                            // this future so we can race it head-to-head with
+                            // the cancellation signal.
+                            let subscribing = async move {
                                 let session = session
                                     .await
                                     .available()
@@ -428,43 +527,27 @@ impl DiagramElementRegistry {
                                 .await
                                 .map_err(ArcError::new)?;
 
-                                Ok::<_, ZenohSubscriptionError>(Ok::<_, JsonMessage>(subscription))
-                            };
+                                loop {
+                                    let next_sample = match subscription.recv_async().await {
+                                        Ok(sample) => sample,
+                                        Err(err) => {
+                                            input.streams.out_error.send(format!("{err}"));
+                                            continue;
+                                        }
+                                    };
 
-                            // Await the subscription connection in parallel
-                            // with watching for a cancellation
-                            let subscription =
-                                match race(subscription_future, receive_cancel(cancel.clone()))
-                                    .await?
-                                {
-                                    Ok(subscription) => subscription,
-                                    Err(cancel_msg) => {
-                                        return Ok(cancel_msg);
-                                    }
-                                };
-
-                            loop {
-                                let next_sample = subscription.recv_async().map(|r| {
-                                    r.map(|sample| Ok::<_, JsonMessage>(sample)).map_err(|err| {
-                                        ZenohSubscriptionError::ZenohError(ArcError::new(err))
-                                    })
-                                });
-
-                                match race(next_sample, receive_cancel(cancel.clone())).await? {
-                                    Ok(sample) => match decoder.decode(sample) {
+                                    match decoder.decode(&next_sample) {
                                         Ok(msg) => {
                                             input.streams.out.send(msg);
                                         }
                                         Err(msg) => {
                                             input.streams.out_error.send(msg);
                                         }
-                                    },
-                                    Err(cancel_msg) => {
-                                        // The user has asked to cancel this node
-                                        return Ok::<_, ZenohSubscriptionError>(cancel_msg);
                                     }
                                 }
-                            }
+                            };
+
+                            race(subscribing, receive_cancel::<ZenohSubscriptionError>(cancel)).await
                         }
                         .await;
 
@@ -489,7 +572,7 @@ impl DiagramElementRegistry {
                 let node = builder.create_node(callback.as_callback());
                 builder.connect(access.output, node.input);
 
-                Ok(Node::<_, _, ZenohSubscriptionStreams> {
+                Ok(Node::<_, _, ZenohNodeStreams> {
                     input: access.input,
                     output: node.output,
                     streams: node.streams,
@@ -521,23 +604,23 @@ impl DiagramElementRegistry {
                 };
 
                 let publisher = publisher.await.map_err(ArcError::new)?;
-
                 Ok::<_, ZenohPublisherError>(Arc::new(publisher))
             }
         };
         let create_publisher = create_publisher.into_async_callback();
 
+        let ensure_session_for_publisher = ensure_session.clone();
         self.register_node_builder_fallible(
             NodeBuilderOptions::new("zenoh_publisher").with_default_display_text("Zenoh Publisher"),
             move |builder, config: ZenohPublisherConfig| {
-                builder.commands().add(ensure_session.clone());
+                builder.commands().add(ensure_session_for_publisher.clone());
 
-                let encoder: Codec = (&config.encoding).try_into()?;
+                let encoder: Codec = (&config.encoder).try_into()?;
                 let publisher = builder
                     .commands()
                     .request(config, create_publisher.clone())
-                    .take_response();
-                let publisher = publisher.shared();
+                    .take_response()
+                    .shared();
 
                 let callback = move |message: JsonMessage| {
                     let publisher = publisher.clone();
@@ -551,13 +634,120 @@ impl DiagramElementRegistry {
                         // be taken out of the promise, so it should always be
                         // available after being awaited.
                         let publisher = publisher.await.available().unwrap()?;
-                        publisher.put(payload).await.map_err(ArcError::new)?;
+                        publisher
+                            .put(payload)
+                            .encoding(encoder.encoding())
+                            .await
+                            .map_err(ArcError::new)?;
                         Ok::<_, ZenohPublisherError>(())
                     }
                 };
 
                 Ok(builder.create_map_async(callback))
             },
+        );
+
+        let create_querier = |In(config): In<ZenohQuerierConfig>,
+                              session: Res<ZenohSession>| {
+            let session_promise = session.promise.clone();
+            async move {
+                let session = session_promise
+                    .await
+                    .available()
+                    .map(|r| r.map_err(ZenohQuerierError::ZenohError))
+                    .unwrap_or(Err(ZenohQuerierError::SessionRemoved))?;
+
+                let querier = session
+                    .declare_querier(config.key.to_string())
+                    .congestion_control(config.congestion_control.into())
+                    .priority(config.priority.into())
+                    .express(config.express)
+                    .target(config.target.into())
+                    .consolidation(config.consolidation)
+                    .allowed_destination(config.locality.into());
+
+                let querier = if let Some(timeout) = config.timeout {
+                    querier.timeout(timeout)
+                } else {
+                    querier
+                };
+
+                let querier = querier.await.map_err(ArcError::new)?;
+                Ok::<_, ZenohQuerierError>(Arc::new(querier))
+            }
+        };
+        let create_querier = create_querier.into_async_callback();
+
+        self.register_node_builder_fallible(
+            NodeBuilderOptions::new("zenoh_querier").with_default_display_text("Zenoh Querier"),
+            move |builder, mut config: ZenohQuerierConfig| {
+                builder.commands().add(ensure_session.clone());
+
+                let encoder: Codec = (&config.encoder).try_into()?;
+                let decoder: Codec = (&config.decoder).try_into()?;
+                let parameters = std::mem::replace(&mut config.parameters, Default::default());
+                let parameters: Arc<Parameters> = Arc::new(parameters.into());
+
+                let querier = builder
+                    .commands()
+                    .request(config, create_querier.clone())
+                    .take_response()
+                    .shared();
+
+                let node = builder.create_map(move |input: AsyncMap<JsonMessage, ZenohNodeStreams>| {
+                    let querier = querier.clone();
+                    let parameters = Arc::clone(&parameters);
+                    let encoder = encoder.clone();
+                    let decoder = decoder.clone();
+                    let (sender, mut cancellation_receiver) = unbounded_channel();
+                    input.streams.canceller.send(sender);
+
+                    async move {
+                        let querying = async move {
+                            let payload = encoder
+                                .encode(input.request)
+                                .map_err(ZenohQuerierError::EncodingError)?;
+
+                            // SAFETY: There is no mechanism for the querier to be
+                            // taken out of the promise, so it should always be
+                            // available after being awaited.
+                            let querier = querier.await.available().unwrap()?;
+                            let replies = querier
+                                .get()
+                                .parameters(parameters.as_ref().clone())
+                                .encoding(encoder.encoding())
+                                .payload(payload)
+                                .await
+                                .map_err(ArcError::new)?;
+
+                            while let Ok(reply) = replies.recv_async().await {
+                                let next_sample = match reply.result() {
+                                    Ok(sample) => sample,
+                                    Err(err) => {
+                                        input.streams.out_error.send(format!("{err}"));
+                                        continue;
+                                    }
+                                };
+
+                                match decoder.decode(next_sample) {
+                                    Ok(msg) => {
+                                        input.streams.out.send(msg);
+                                    }
+                                    Err(msg) => {
+                                        input.streams.out_error.send(msg);
+                                    }
+                                }
+                            }
+
+                            Ok::<_, ZenohQuerierError>(JsonMessage::default())
+                        };
+                        let cancel = cancellation_receiver.recv();
+                        race(querying, receive_cancel(cancel)).await
+                    }
+                });
+
+                Ok(node)
+            }
         );
 
         // TODO(@mxgrey): Support dynamic connections whose configurations are
@@ -663,11 +853,11 @@ impl Command for EnsureZenohSession {
     }
 }
 
-async fn receive_cancel<T>(
+async fn receive_cancel<E>(
     receiver: impl Future<Output = Option<JsonMessage>>,
-) -> Result<Result<T, JsonMessage>, ZenohSubscriptionError> {
+) -> Result<JsonMessage, E> {
     match receiver.await {
-        Some(msg) => Ok(Err(msg)),
+        Some(msg) => Ok(msg),
         None => {
             // The sender for the cancellation signal was dropped so we must
             // never let this future finish.
@@ -706,14 +896,14 @@ impl Codec {
         }
     }
 
-    fn decode(&self, sample: Sample) -> Result<JsonMessage, String> {
+    fn decode(&self, sample: &Sample) -> Result<JsonMessage, String> {
         match self {
             Codec::Protobuf(descriptor) => {
                 let msg = DynamicMessage::decode(
                     descriptor.clone(),
                     sample.payload().to_bytes().as_ref(),
                 )
-                .map_err(|err| format!("{err}"))?;
+                .map_err(|err| decode_error_msg(err, &sample))?;
 
                 // TODO(@mxgrey): Refactor this to share an implementation with
                 // the decoder in the grpc feature
@@ -725,53 +915,53 @@ impl Codec {
                         .skip_default_fields(false),
                 );
 
-                match value {
-                    Ok(msg) => {
-                        return Ok(msg);
-                    }
-                    Err(err) => {
-                        return Err(format!("{err}"));
-                    }
-                }
+                value.map_err(|err| decode_error_msg(err, &sample))
             }
             Codec::Json => {
                 let payload: String = match z_deserialize(sample.payload()) {
                     Ok(payload) => payload,
                     Err(err) => {
-                        return Err(format!("{err}"));
+                        return Err(decode_error_msg(err, &sample));
                     }
                 };
 
-                match serde_json::from_str::<JsonMessage>(&payload) {
-                    Ok(msg) => {
-                        return Ok(msg);
-                    }
-                    Err(err) => {
-                        return Err(format!("{err}"));
-                    }
-                };
+                serde_json::from_str::<JsonMessage>(&payload)
+                    .map_err(|err| decode_error_msg(err, &sample))
             }
             Codec::Bson => {
-                match bson::deserialize_from_slice::<JsonMessage>(
-                    sample.payload().to_bytes().as_ref(),
-                ) {
-                    Ok(msg) => {
-                        return Ok(msg);
-                    }
-                    Err(err) => {
-                        return Err(format!("{err}"));
-                    }
-                }
+                bson::deserialize_from_slice::<JsonMessage>(
+                    sample.payload().to_bytes().as_ref()
+                )
+                    .map_err(|err| decode_error_msg(err, &sample))
             }
+        }
+    }
+
+    fn encoding(&self) -> Encoding {
+        match self {
+            Codec::Protobuf(descriptor) => {
+                Encoding::APPLICATION_PROTOBUF
+                    .with_schema(descriptor.full_name())
+            }
+            Codec::Json => Encoding::TEXT_JSON,
+            Codec::Bson => Encoding::from("application/bson"),
         }
     }
 }
 
-impl TryFrom<&'_ EncodingConfig> for Codec {
+fn decode_error_msg<T: Error>(msg: T, sample: &Sample) -> String {
+    format!(
+        "failed to decode sample with encoding [{}]: {}",
+        sample.encoding(),
+        msg,
+    )
+}
+
+impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
     type Error = ZenohBuildError;
-    fn try_from(value: &EncodingConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: &ZenohEncodingConfig) -> Result<Self, Self::Error> {
         match value {
-            EncodingConfig::Protobuf(message_type) => {
+            ZenohEncodingConfig::Protobuf(message_type) => {
                 let descriptors = DescriptorPool::global();
                 let Some(msg) = descriptors.get_message_by_name(&message_type) else {
                     return Err(ZenohBuildError::MissingMessageDescriptor(Arc::clone(
@@ -782,8 +972,8 @@ impl TryFrom<&'_ EncodingConfig> for Codec {
 
                 Ok(Codec::Protobuf(msg))
             }
-            EncodingConfig::Json => Ok(Codec::Json),
-            EncodingConfig::Bson => Ok(Codec::Bson),
+            ZenohEncodingConfig::Json => Ok(Codec::Json),
+            ZenohEncodingConfig::Bson => Ok(Codec::Bson),
         }
     }
 }
