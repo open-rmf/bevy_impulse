@@ -18,11 +18,7 @@
 use super::*;
 use crate::AsyncMap;
 
-use std::{
-    future::Future,
-    sync::Arc,
-    time::Duration,
-};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 
@@ -44,11 +40,8 @@ use serde::{Deserialize, Serialize};
 
 use tokio::runtime::Runtime;
 
-use futures::{
-    stream::once,
-    FutureExt, Stream as FutureStream,
-};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use futures::{stream::once, FutureExt, Stream as FutureStream};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use futures_lite::future::race;
 
@@ -409,13 +402,13 @@ impl Decoder for DynamicMessageCodec {
 mod tests {
     use super::*;
     use crate::{diagram::testing::*, prelude::*, testing::*};
+    use futures::channel::oneshot::{self, Sender as OneShotSender};
     use prost_reflect::Kind;
     use protos::{
         fibonacci_server::{Fibonacci, FibonacciServer},
         navigation_server::{Navigation, NavigationServer},
         FibonacciReply, FibonacciRequest, NavigationGoal, NavigationUpdate,
     };
-    use futures::channel::oneshot::{self, Sender as OneShotSender};
     use serde_json::json;
     use std::sync::Arc;
     use tokio::{

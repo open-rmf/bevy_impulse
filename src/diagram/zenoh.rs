@@ -18,40 +18,39 @@
 use super::*;
 use crate::prelude::*;
 
-use bevy_ecs::{
-    prelude::{In, Resource, Res, World},
-    system::Command,
+use ::zenoh::{
+    bytes::ZBytes,
+    qos::{CongestionControl, Priority},
+    sample::{Locality, Sample},
+    Session,
 };
 use bevy_derive::{Deref, DerefMut};
-use ::zenoh::{
-    Session,
-    bytes::ZBytes,
-    sample::{Locality, Sample},
-    qos::{CongestionControl, Priority},
+use bevy_ecs::{
+    prelude::{In, Res, Resource, World},
+    system::Command,
 };
-use zenoh_ext::{
-    AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig,
-    HistoryConfig, RecoveryConfig, RepliesConfig, MissDetectionConfig,
-    z_deserialize,
-};
-use std::{
-    error::Error,
-    time::Duration,
-    future::Future,
-    sync::Mutex,
-};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use futures::future::Shared;
 use futures_lite::future::race;
+use prost_reflect::{
+    prost::Message, DescriptorPool, DynamicMessage, MessageDescriptor, SerializeOptions,
+};
+use std::{error::Error, future::Future, sync::Mutex, time::Duration};
 use thiserror::Error as ThisError;
-use prost_reflect::{DynamicMessage, MessageDescriptor, DescriptorPool, SerializeOptions, prost::Message};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use zenoh_ext::{
+    z_deserialize, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig,
+    HistoryConfig, MissDetectionConfig, RecoveryConfig, RepliesConfig,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ZenohSubscriptionConfig {
     /// The key that this subscription will use to connect to publishers.
     pub key: Arc<str>,
-    #[serde(default, skip_serializing_if = "ZenohSubscriptionHistoryConfig::is_default")]
+    #[serde(
+        default,
+        skip_serializing_if = "ZenohSubscriptionHistoryConfig::is_default"
+    )]
     pub history: ZenohSubscriptionHistoryConfig,
     #[serde(default, skip_serializing_if = "is_default")]
     pub recovery: ZenohSubscriptionRecoveryConfig,
@@ -142,8 +141,7 @@ pub struct ZenohPublisherConfig {
 
 impl ZenohPublisherConfig {
     pub fn cache_config(&self) -> CacheConfig {
-        let mut cache = CacheConfig::default()
-            .replies_config(self.replies_config());
+        let mut cache = CacheConfig::default().replies_config(self.replies_config());
 
         if let Some(depth) = self.max_samples {
             cache = cache.max_samples(depth);
@@ -281,9 +279,7 @@ impl From<LocalityConfig> for Locality {
 
 impl ZenohSubscriptionHistoryConfig {
     pub fn is_default(&self) -> bool {
-        !self.detect_late_publishers
-        && self.max_samples.is_none()
-        && self.max_age.is_none()
+        !self.detect_late_publishers && self.max_samples.is_none() && self.max_age.is_none()
     }
 }
 
@@ -321,7 +317,7 @@ pub struct ZenohSubscriptionStreams {
     pub canceller: UnboundedSender<JsonMessage>,
 }
 
-#[derive(ThisError, Debug, Clone, Serialize, JsonSchema)]
+#[derive(ThisError, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ZenohSubscriptionError {
     #[error("the subscription was already active")]
@@ -334,7 +330,7 @@ pub enum ZenohSubscriptionError {
     ZenohError(#[from] ArcError),
 }
 
-#[derive(ThisError, Debug, Clone, Serialize, JsonSchema)]
+#[derive(ThisError, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ZenohPublisherError {
     #[error("the zenoh session was removed from its resource")]
@@ -356,125 +352,127 @@ impl DiagramElementRegistry {
         let ensure_session = EnsureZenohSession::new(zenoh_session_config);
 
         let ensure_session_for_subscription = ensure_session.clone();
-        self
-            .opt_out()
-            .no_deserializing()
-            .register_node_builder_fallible(
-                NodeBuilderOptions::new("zenoh_subscription")
-                    .with_default_display_text("Zenoh Subscription"),
-                move |builder, config: ZenohSubscriptionConfig| {
-                    builder.commands().add(ensure_session_for_subscription.clone());
+        self.register_node_builder_fallible(
+            NodeBuilderOptions::new("zenoh_subscription")
+                .with_default_display_text("Zenoh Subscription"),
+            move |builder, config: ZenohSubscriptionConfig| {
+                builder
+                    .commands()
+                    .add(ensure_session_for_subscription.clone());
 
-                    let active_buffer = builder.create_buffer::<()>(BufferSettings::default());
-                    let access = builder.create_buffer_access::<(), _>(active_buffer);
+                let active_buffer = builder.create_buffer::<()>(BufferSettings::default());
+                let access = builder.create_buffer_access::<(), _>(active_buffer);
 
-                    let decoder: Codec = (&config.encoding).try_into()?;
+                let decoder: Codec = (&config.encoding).try_into()?;
 
-                    let callback = move |
-                        In(input): AsyncCallbackInput<((), BufferKey<()>), ZenohSubscriptionStreams>,
-                        mut active: BufferAccessMut<()>,
-                        session: Res<ZenohSession>,
-                    | {
-                        // First make sure an instance of this node isn't already active
-                        let already_active = active.get_mut(&input.request.1)
-                            .map_err(|_| ZenohSubscriptionError::BufferDespawned)
-                            .and_then(|mut active_buffer| {
-                                if active_buffer.is_empty() {
-                                    active_buffer.push(());
-                                    return Ok(());
-                                } else {
-                                    return Err(ZenohSubscriptionError::AlreadyActive);
-                                }
-                            });
+                let callback = move |In(input): AsyncCallbackInput<
+                    ((), BufferKey<()>),
+                    ZenohSubscriptionStreams,
+                >,
+                                     mut active: BufferAccessMut<()>,
+                                     session: Res<ZenohSession>| {
+                    // First make sure an instance of this node isn't already active
+                    let already_active = active
+                        .get_mut(&input.request.1)
+                        .map_err(|_| ZenohSubscriptionError::BufferDespawned)
+                        .and_then(|mut active_buffer| {
+                            if active_buffer.is_empty() {
+                                active_buffer.push(());
+                                return Ok(());
+                            } else {
+                                return Err(ZenohSubscriptionError::AlreadyActive);
+                            }
+                        });
 
-                        let session = session.promise.clone();
+                    let session = session.promise.clone();
 
-                        let (sender, mut receiver) = unbounded_channel();
-                        input.streams.canceller.send(sender);
+                    let (sender, mut receiver) = unbounded_channel();
+                    input.streams.canceller.send(sender);
 
-                        let config = config.clone();
-                        let decoder = decoder.clone();
-                        async move {
-                            // Return right away if the subscription is already active
-                            already_active?;
+                    let config = config.clone();
+                    let decoder = decoder.clone();
+                    async move {
+                        // Return right away if the subscription is already active
+                        already_active?;
 
-                            let cancel = receiver.recv().shared();
+                        let cancel = receiver.recv().shared();
 
-                            let active_key = input.request.1;
-                            let r = async move {
-                                let subscription_future = async move {
-                                    let session = session
-                                        .await
-                                        .available()
-                                        .map(|r| r.map_err(ZenohSubscriptionError::ZenohError))
-                                        .unwrap_or_else(|| Err(ZenohSubscriptionError::SessionRemoved))?;
-
-                                    let subscription_builder = session
-                                        .declare_subscriber(config.key.as_ref())
-                                        .allowed_origin(config.locality.into())
-                                        .history(config.history.into());
-
-                                    let subscription = match config.recovery {
-                                        ZenohSubscriptionRecoveryConfig::None => { subscription_builder }
-                                        ZenohSubscriptionRecoveryConfig::PeriodicQueries(period) => {
-                                            subscription_builder.recovery(
-                                                RecoveryConfig::default()
-                                                .periodic_queries(period)
-                                            )
-                                        }
-                                        ZenohSubscriptionRecoveryConfig::Heartbeat => {
-                                            subscription_builder.recovery(
-                                                RecoveryConfig::default()
-                                                .heartbeat()
-                                            )
-                                        }
-                                    }
+                        let active_key = input.request.1;
+                        let r = async move {
+                            let subscription_future = async move {
+                                let session = session
                                     .await
-                                    .map_err(ArcError::new)?;
+                                    .available()
+                                    .map(|r| r.map_err(ZenohSubscriptionError::ZenohError))
+                                    .unwrap_or_else(|| {
+                                        Err(ZenohSubscriptionError::SessionRemoved)
+                                    })?;
 
-                                    Ok::<_, ZenohSubscriptionError>(Ok::<_, JsonMessage>(subscription))
-                                };
+                                let subscription_builder = session
+                                    .declare_subscriber(config.key.as_ref())
+                                    .allowed_origin(config.locality.into())
+                                    .history(config.history.into());
 
-                                // Await the subscription connection in parallel
-                                // with watching for a cancellation
-                                let subscription = match race(subscription_future, receive_cancel(cancel.clone())).await? {
+                                let subscription = match config.recovery {
+                                    ZenohSubscriptionRecoveryConfig::None => subscription_builder,
+                                    ZenohSubscriptionRecoveryConfig::PeriodicQueries(period) => {
+                                        subscription_builder.recovery(
+                                            RecoveryConfig::default().periodic_queries(period),
+                                        )
+                                    }
+                                    ZenohSubscriptionRecoveryConfig::Heartbeat => {
+                                        subscription_builder
+                                            .recovery(RecoveryConfig::default().heartbeat())
+                                    }
+                                }
+                                .await
+                                .map_err(ArcError::new)?;
+
+                                Ok::<_, ZenohSubscriptionError>(Ok::<_, JsonMessage>(subscription))
+                            };
+
+                            // Await the subscription connection in parallel
+                            // with watching for a cancellation
+                            let subscription =
+                                match race(subscription_future, receive_cancel(cancel.clone()))
+                                    .await?
+                                {
                                     Ok(subscription) => subscription,
                                     Err(cancel_msg) => {
                                         return Ok(cancel_msg);
                                     }
                                 };
 
-                                loop {
-                                    let next_sample = subscription
-                                        .recv_async()
-                                        .map(|r|
-                                            r
-                                            .map(|sample| Ok::<_, JsonMessage>(sample))
-                                            .map_err(|err| ZenohSubscriptionError::ZenohError(ArcError::new(err)))
-                                        );
+                            loop {
+                                let next_sample = subscription.recv_async().map(|r| {
+                                    r.map(|sample| Ok::<_, JsonMessage>(sample)).map_err(|err| {
+                                        ZenohSubscriptionError::ZenohError(ArcError::new(err))
+                                    })
+                                });
 
-                                    match race(next_sample, receive_cancel(cancel.clone())).await? {
-                                        Ok(sample) => {
-                                            match decoder.decode(sample) {
-                                                Ok(msg) => {
-                                                    input.streams.out.send(msg);
-                                                }
-                                                Err(msg) => {
-                                                    input.streams.out_error.send(msg);
-                                                }
-                                            }
+                                match race(next_sample, receive_cancel(cancel.clone())).await? {
+                                    Ok(sample) => match decoder.decode(sample) {
+                                        Ok(msg) => {
+                                            input.streams.out.send(msg);
                                         }
-                                        Err(cancel_msg) => {
-                                            // The user has asked to cancel this node
-                                            return Ok::<_, ZenohSubscriptionError>(cancel_msg);
+                                        Err(msg) => {
+                                            input.streams.out_error.send(msg);
                                         }
+                                    },
+                                    Err(cancel_msg) => {
+                                        // The user has asked to cancel this node
+                                        return Ok::<_, ZenohSubscriptionError>(cancel_msg);
                                     }
                                 }
-                            }.await;
+                            }
+                        }
+                        .await;
 
-                            // Clear the buffer to indicate that the subscription
-                            // could be restarted.
-                            input.channel.command(move |commands| {
+                        // Clear the buffer to indicate that the subscription
+                        // could be restarted.
+                        input
+                            .channel
+                            .command(move |commands| {
                                 commands.add(move |world: &mut World| {
                                     let _ = world.buffer_mut(&active_key, |mut active_buffer| {
                                         active_buffer.drain(..);
@@ -483,27 +481,25 @@ impl DiagramElementRegistry {
                             })
                             .await;
 
-                            // Return the result from earlier
-                            r
-                        }
-                    };
+                        // Return the result from earlier
+                        r
+                    }
+                };
 
-                    let node = builder.create_node(callback.as_callback());
-                    builder.connect(access.output, node.input);
+                let node = builder.create_node(callback.as_callback());
+                builder.connect(access.output, node.input);
 
-                    Ok(Node::<_, _, ZenohSubscriptionStreams> {
-                        input: access.input,
-                        output: node.output,
-                        streams: node.streams,
-                    })
-                }
-            )
-            .with_fork_result();
+                Ok(Node::<_, _, ZenohSubscriptionStreams> {
+                    input: access.input,
+                    output: node.output,
+                    streams: node.streams,
+                })
+            },
+        )
+        .with_fork_result();
 
-        let create_publisher = |
-            In(config): In<ZenohPublisherConfig>,
-            session: Res<ZenohSession>,
-        | {
+        let create_publisher = |In(config): In<ZenohPublisherConfig>,
+                                session: Res<ZenohSession>| {
             let session_promise = session.promise.clone();
             async move {
                 let session = session_promise
@@ -524,48 +520,45 @@ impl DiagramElementRegistry {
                     }
                 };
 
-                let publisher = publisher
-                    .await
-                    .map_err(ArcError::new)?;
+                let publisher = publisher.await.map_err(ArcError::new)?;
 
                 Ok::<_, ZenohPublisherError>(Arc::new(publisher))
             }
         };
         let create_publisher = create_publisher.into_async_callback();
 
-        self
-            .opt_out()
-            .no_deserializing()
-            .register_node_builder_fallible(
-                NodeBuilderOptions::new("zenoh_publisher")
-                    .with_default_display_text("Zenoh Publisher"),
-                move |builder, config: ZenohPublisherConfig| {
-                    builder.commands().add(ensure_session.clone());
+        self.register_node_builder_fallible(
+            NodeBuilderOptions::new("zenoh_publisher").with_default_display_text("Zenoh Publisher"),
+            move |builder, config: ZenohPublisherConfig| {
+                builder.commands().add(ensure_session.clone());
 
-                    let encoder: Codec = (&config.encoding).try_into()?;
-                    let publisher = builder.commands().request(config, create_publisher.clone()).take_response();
-                    let publisher = publisher.shared();
+                let encoder: Codec = (&config.encoding).try_into()?;
+                let publisher = builder
+                    .commands()
+                    .request(config, create_publisher.clone())
+                    .take_response();
+                let publisher = publisher.shared();
 
-                    let callback = move |message: JsonMessage| {
-                        let publisher = publisher.clone();
-                        let encoder = encoder.clone();
-                        async move {
-                            let payload = encoder
-                                .encode(message)
-                                .map_err(ZenohPublisherError::EncodingError)?;
+                let callback = move |message: JsonMessage| {
+                    let publisher = publisher.clone();
+                    let encoder = encoder.clone();
+                    async move {
+                        let payload = encoder
+                            .encode(message)
+                            .map_err(ZenohPublisherError::EncodingError)?;
 
-                            // SAFETY: There is no mechanism for the publisher to
-                            // be taken out of the promise, so it should always be
-                            // available after being awaited.
-                            let publisher = publisher.await.available().unwrap()?;
-                            publisher.put(payload).await.map_err(ArcError::new)?;
-                            Ok::<_, ZenohPublisherError>(())
-                        }
-                    };
+                        // SAFETY: There is no mechanism for the publisher to
+                        // be taken out of the promise, so it should always be
+                        // available after being awaited.
+                        let publisher = publisher.await.available().unwrap()?;
+                        publisher.put(payload).await.map_err(ArcError::new)?;
+                        Ok::<_, ZenohPublisherError>(())
+                    }
+                };
 
-                    Ok(builder.create_map_async(callback))
-                }
-            );
+                Ok(builder.create_map_async(callback))
+            },
+        );
 
         // TODO(@mxgrey): Support dynamic connections whose configurations are
         // decided within the workflow and passed into the node as input.
@@ -585,9 +578,42 @@ impl ArcError {
 impl Serialize for ArcError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         serializer.serialize_str(&format!("{}", self.0))
+    }
+}
+
+struct ArcErrorVisitor;
+
+impl<'de> Visitor<'de> for ArcErrorVisitor {
+    type Value = ArcError;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a string describing an error")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(ArcError(Arc::new(DeserializedError(v.to_string()))))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(ArcError(Arc::new(DeserializedError(v))))
+    }
+}
+
+impl<'de> Deserialize<'de> for ArcError {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(ArcErrorVisitor)
     }
 }
 
@@ -628,11 +654,7 @@ impl Command for EnsureZenohSession {
         let promise = world
             .command(|commands| {
                 commands
-                    .serve(async {
-                        ::zenoh::open(config)
-                        .await
-                        .map_err(ArcError::new)
-                    })
+                    .serve(async { ::zenoh::open(config).await.map_err(ArcError::new) })
                     .take_response()
             })
             .shared();
@@ -645,9 +667,7 @@ async fn receive_cancel<T>(
     receiver: impl Future<Output = Option<JsonMessage>>,
 ) -> Result<Result<T, JsonMessage>, ZenohSubscriptionError> {
     match receiver.await {
-        Some(msg) => {
-            Ok(Err(msg))
-        }
+        Some(msg) => Ok(Err(msg)),
         None => {
             // The sender for the cancellation signal was dropped so we must
             // never let this future finish.
@@ -674,8 +694,8 @@ impl Codec {
                 Ok(ZBytes::from(msg.encode_to_vec()))
             }
             Codec::Json => {
-                let msg_as_string: String = serde_json::from_value(message)
-                    .map_err(|err| format!("{err}"))?;
+                let msg_as_string: String =
+                    serde_json::from_value(message).map_err(|err| format!("{err}"))?;
 
                 Ok(ZBytes::from(msg_as_string))
             }
@@ -697,14 +717,13 @@ impl Codec {
 
                 // TODO(@mxgrey): Refactor this to share an implementation with
                 // the decoder in the grpc feature
-                let value = msg
-                    .serialize_with_options(
-                        serde_json::value::Serializer,
-                        &SerializeOptions::new()
-                            .stringify_64_bit_integers(false)
-                            .use_proto_field_name(true)
-                            .skip_default_fields(false),
-                    );
+                let value = msg.serialize_with_options(
+                    serde_json::value::Serializer,
+                    &SerializeOptions::new()
+                        .stringify_64_bit_integers(false)
+                        .use_proto_field_name(true)
+                        .skip_default_fields(false),
+                );
 
                 match value {
                     Ok(msg) => {
@@ -733,7 +752,9 @@ impl Codec {
                 };
             }
             Codec::Bson => {
-                match bson::deserialize_from_slice::<JsonMessage>(sample.payload().to_bytes().as_ref()) {
+                match bson::deserialize_from_slice::<JsonMessage>(
+                    sample.payload().to_bytes().as_ref(),
+                ) {
                     Ok(msg) => {
                         return Ok(msg);
                     }
@@ -753,7 +774,10 @@ impl TryFrom<&'_ EncodingConfig> for Codec {
             EncodingConfig::Protobuf(message_type) => {
                 let descriptors = DescriptorPool::global();
                 let Some(msg) = descriptors.get_message_by_name(&message_type) else {
-                    return Err(ZenohBuildError::MissingMessageDescriptor(Arc::clone(&message_type)).into());
+                    return Err(ZenohBuildError::MissingMessageDescriptor(Arc::clone(
+                        &message_type,
+                    ))
+                    .into());
                 };
 
                 Ok(Codec::Protobuf(msg))
@@ -763,3 +787,7 @@ impl TryFrom<&'_ EncodingConfig> for Codec {
         }
     }
 }
+
+#[derive(ThisError, Debug)]
+#[error("{}", .0)]
+struct DeserializedError(String);
