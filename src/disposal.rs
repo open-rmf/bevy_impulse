@@ -532,7 +532,6 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
             return;
         };
         let scope = scope.get();
-        let id = self.id();
 
         if let Some(mut storage) = self.get_mut::<DisposalStorage>() {
             storage.disposals.entry(session).or_default().push(disposal);

@@ -1397,7 +1397,7 @@ impl DiagramElementRegistry {
         &mut self,
         options: NodeBuilderOptions,
         builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + Send + 'static,
-    ) -> NodeRegistrationBuilder<Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<'_, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
@@ -1416,7 +1416,7 @@ impl DiagramElementRegistry {
         builder: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow>
             + Send
             + 'static,
-    ) -> NodeRegistrationBuilder<Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<'_, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
@@ -1439,7 +1439,7 @@ impl DiagramElementRegistry {
     /// Use [`Self::opt_out`] to opt out of specified common operations before
     /// beginning to register the message. This allows you to register message
     /// types that do not support one or more of the common operations.
-    pub fn register_message<Message>(&mut self) -> MessageRegistrationBuilder<Message>
+    pub fn register_message<Message>(&mut self) -> MessageRegistrationBuilder<'_, Message>
     where
         Message: Send + Sync + 'static + DynType + DeserializeOwned + Serialize + Clone,
     {
@@ -1517,7 +1517,7 @@ impl DiagramElementRegistry {
     /// Note that nodes registered without deserialization cannot be connected
     /// to the workflow start, and nodes registered without serialization cannot
     /// be connected to the workflow termination.
-    pub fn opt_out(&mut self) -> CommonOperations<Supported, Supported, Supported> {
+    pub fn opt_out(&mut self) -> CommonOperations<'_, Supported, Supported, Supported> {
         CommonOperations {
             registry: self,
             _ignore: Default::default(),
