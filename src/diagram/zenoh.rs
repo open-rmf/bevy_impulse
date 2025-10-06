@@ -36,7 +36,6 @@ use prost_reflect::{
 use std::{error::Error, future::Future, sync::Mutex};
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc::UnboundedSender;
-use zenoh_ext::z_deserialize;
 
 mod register_zenoh_publisher;
 mod register_zenoh_querier;
@@ -139,8 +138,6 @@ pub enum ZenohEncodingConfig {
     Json,
     /// Interpret the payload as the serialized bytes of the specified type of protobuf message
     Protobuf(Arc<str>),
-    /// Interpret the payload as the raw bytes of a BSON value
-    Bson,
 }
 
 #[derive(StreamPack)]
@@ -279,27 +276,22 @@ async fn receive_cancel<E>(
 enum Codec {
     Protobuf(MessageDescriptor),
     Json,
-    Bson,
 }
 
 impl Codec {
     fn encode(&self, message: JsonMessage) -> Result<ZBytes, String> {
         match self {
             Codec::Protobuf(descriptor) => {
-                let msg = DynamicMessage::deserialize(descriptor.clone(), message)
+                let msg = DynamicMessage::deserialize(descriptor.clone(), &message)
                     .map_err(|err| format!("{err}"))?;
 
                 Ok(ZBytes::from(msg.encode_to_vec()))
             }
             Codec::Json => {
-                let msg_as_string: String =
-                    serde_json::from_value(message).map_err(|err| format!("{err}"))?;
+                let msg_as_string = serde_json::to_string(&message)
+                    .map_err(|err| format!("{err}"))?;
 
                 Ok(ZBytes::from(msg_as_string))
-            }
-            Codec::Bson => {
-                let bytes = bson::serialize_to_vec(&message).map_err(|err| format!("{err}"))?;
-                Ok(ZBytes::from(bytes))
             }
         }
     }
@@ -326,18 +318,10 @@ impl Codec {
                 value.map_err(|err| decode_error_msg(err, &sample))
             }
             Codec::Json => {
-                let payload: String = match z_deserialize(sample.payload()) {
-                    Ok(payload) => payload,
-                    Err(err) => {
-                        return Err(decode_error_msg(err, &sample));
-                    }
-                };
+                let payload = sample.payload().try_to_string()
+                    .map_err(|err| decode_error_msg(err, &sample))?;
 
                 serde_json::from_str::<JsonMessage>(&payload)
-                    .map_err(|err| decode_error_msg(err, &sample))
-            }
-            Codec::Bson => {
-                bson::deserialize_from_slice::<JsonMessage>(sample.payload().to_bytes().as_ref())
                     .map_err(|err| decode_error_msg(err, &sample))
             }
         }
@@ -349,7 +333,6 @@ impl Codec {
                 Encoding::APPLICATION_PROTOBUF.with_schema(descriptor.full_name())
             }
             Codec::Json => Encoding::TEXT_JSON,
-            Codec::Bson => Encoding::from("application/bson"),
         }
     }
 }
@@ -378,7 +361,6 @@ impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
                 Ok(Codec::Protobuf(msg))
             }
             ZenohEncodingConfig::Json => Ok(Codec::Json),
-            ZenohEncodingConfig::Bson => Ok(Codec::Bson),
         }
     }
 }
@@ -386,3 +368,208 @@ impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
 #[derive(ThisError, Debug)]
 #[error("{}", .0)]
 struct DeserializedError(String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{diagram::testing::*, testing::*};
+    use async_std::future::timeout as until_timeout;
+    use std::time::Instant;
+    use serde_json::json;
+
+    #[test]
+    fn test_zenoh_pub_sub() {
+        impl_test_zenoh_pub_sub(
+            vec![
+                json!({
+                    "hello": "world",
+                    "number": 10.0,
+                }),
+                json!(5.0),
+                json!("some string"),
+                json!([
+                    "string_value",
+                    13,
+                    {
+                        "object": "value",
+                        "with": "fields"
+                    }
+                ])
+            ],
+            "json",
+        );
+    }
+
+    fn impl_test_zenoh_pub_sub(
+        input_messages: Vec<JsonMessage>,
+        codec: &str,
+    ) {
+        let mut fixture = DiagramTestFixture::new();
+        fixture.registry.enable_zenoh(Default::default());
+
+        fixture.registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("wait_for_matching"),
+                |builder, _config: ()| {
+                    builder.create_node(wait_for_matching.into_blocking_callback())
+                }
+            )
+            .with_listen()
+            .with_fork_result();
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("slow_spread"),
+            |builder, _config: ()| {
+                builder.create_map(
+                    |input: AsyncMap<Vec<JsonMessage>, SlowSpreadStreams>| {
+                        async move {
+                            for value in input.request {
+                                let _ = until_timeout(Duration::from_millis(1), NeverFinish).await;
+                                input.streams.out.send(value);
+                            }
+                        }
+                    }
+                )
+            }
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "initialize",
+            "ops": {
+                "initialize": {
+                    "type": "fork_clone",
+                    "next": [
+                        "slow_spread",
+                        "trigger_sub",
+                        "expectation"
+                    ]
+                },
+                "slow_spread": {
+                    "type": "node",
+                    "builder": "slow_spread",
+                    "next": { "builtin": "dispose" },
+                    "stream_out": { "out": "pub" }
+                },
+                "pub": {
+                    "type": "node",
+                    "builder": "zenoh_publisher",
+                    "config": {
+                        "key": format!("test_zenoh_pub_sub_key_{}", codec),
+                        "encoder": codec,
+                        "locality": "session_local"
+                    },
+                    "next": { "builtin": "dispose" }
+                },
+                "trigger_sub": {
+                    "type": "transform",
+                    "cel": "null",
+                    "next": "sub"
+                },
+                "sub": {
+                    "type": "node",
+                    "builder": "zenoh_subscription",
+                    "config": {
+                        "key": format!("test_zenoh_pub_sub_key_{}", codec),
+                        "decoder": codec,
+                        "locality": "session_local"
+                    },
+                    "next": { "builtin": "dispose" },
+                    "stream_out": { "out": "actual" }
+                },
+                "expectation": { "type": "buffer" },
+                "actual": {
+                    "type": "buffer",
+                    "settings": { "retention": "keep_all" }
+                },
+                "listen_for_wait": {
+                    "type": "listen",
+                    "buffers": {
+                        "expectation": "expectation",
+                        "actual": "actual"
+                    },
+                    "next": "wait"
+                },
+                "wait": {
+                    "type": "node",
+                    "builder": "wait_for_matching",
+                    "next": "filter"
+                },
+                "filter": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": { "builtin" : "dispose" }
+                },
+            }
+        }))
+        .unwrap();
+
+        let result: Result<(), String> = fixture.spawn_and_run(&diagram, input_messages).unwrap();
+        result.unwrap();
+    }
+
+    #[derive(StreamPack)]
+    struct SlowSpreadStreams {
+        out: JsonMessage
+    }
+
+    #[derive(Accessor, Clone)]
+    struct PubSubTestKeys {
+        expectation: BufferKey<Vec<JsonMessage>>,
+        actual: BufferKey<JsonMessage>,
+    }
+
+    fn wait_for_matching(
+        In(keys): In<PubSubTestKeys>,
+        access_expectation: BufferAccess<Vec<JsonMessage>>,
+        access_actual: BufferAccess<JsonMessage>,
+        mut timer: Local<Option<Instant>>,
+    ) -> Result<Result<(), String>, ()> {
+        let expectation = access_expectation.get_newest(&keys.expectation).unwrap();
+        let actual = access_actual.get(&keys.actual).unwrap();
+
+        if actual.len() < expectation.len() {
+            // Still waiting for publications to arrive. Check the timer.
+            if let Some(start) = &*timer {
+                if start.elapsed() > Duration::from_secs(2) {
+                    // Have the test fail because it's taking too long
+                    return Ok(Err(String::from("timeout")));
+                }
+
+                // Keep waiting for more messages
+                return Err(());
+            } else {
+                // This is the first run of the system, so insert the current time
+                *timer = Some(Instant::now());
+                return Err(());
+            }
+        }
+
+        if actual.len() > expectation.len() {
+            let actual_values: Vec<_> = actual.iter().collect();
+            return Ok(Err(format!(
+                "Too many messages appeared. Expected {}, received {}: {:?}",
+                expectation.len(),
+                actual.len(),
+                actual_values,
+            )));
+        }
+
+        for expected_value in expectation {
+            // NOTE: zenoh seems willing to send messages out of their original
+            // order, and there doesn't seem to be any way to enforce that messages
+            // arrive in order, so we can't make any assumptions about ordering
+            // when we check for the expected messages.
+            if actual.iter().find(|actual_value| *actual_value == expected_value).is_some() {
+                continue;
+            }
+
+            return Ok(Err(format!("Expected message missing: {expected_value:?}")));
+        }
+
+        Ok(Ok(()))
+    }
+}

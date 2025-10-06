@@ -192,6 +192,7 @@ impl DiagramElementRegistry {
                             .encoding(encoder.encoding())
                             .await
                             .map_err(ArcError::new)?;
+
                         Ok::<_, ZenohPublisherError>(())
                     }
                 };

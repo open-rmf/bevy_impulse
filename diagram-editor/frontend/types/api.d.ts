@@ -218,7 +218,6 @@ export interface DiagramEditorApi {
  *          "buffer_access": {
  *              "type": "buffer_access",
  *              "buffers": ["string_buffer"],
- *              "target_node": "with_buffer_access",
  *              "next": "with_buffer_access"
  *          },
  *          "with_buffer_access": {
@@ -313,7 +312,6 @@ export interface NamespacedOperation {
  *          "buffer_access": {
  *              "type": "buffer_access",
  *              "buffers": ["string_buffer"],
- *              "target_node": "with_buffer_access",
  *              "next": "with_buffer_access"
  *          },
  *          "with_buffer_access": {
@@ -1005,7 +1003,6 @@ export interface TransformSchema {
  *          "listen": {
  *              "type": "listen",
  *              "buffers": ["buffer"],
- *              "target_node": "listen_buffer",
  *              "next": "listen_buffer"
  *          },
  *          "listen_buffer": {
