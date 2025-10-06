@@ -17,15 +17,10 @@
 
 use super::*;
 
-use bevy_ecs::{
-    prelude::{In, Res},
-};
+use bevy_ecs::prelude::{In, Res};
 use std::time::Duration;
 use thiserror::Error as ThisError;
-use zenoh_ext::{
-    AdvancedPublisherBuilderExt, CacheConfig,
-    MissDetectionConfig, RepliesConfig,
-};
+use zenoh_ext::{AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig, RepliesConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ZenohPublisherConfig {

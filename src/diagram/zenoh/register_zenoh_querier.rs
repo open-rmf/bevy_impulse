@@ -17,12 +17,8 @@
 
 use super::*;
 
-use ::zenoh::{
-    query::{QueryConsolidation, ConsolidationMode, QueryTarget, Parameters},
-};
-use bevy_ecs::{
-    prelude::{In, Res},
-};
+use ::zenoh::query::{ConsolidationMode, Parameters, QueryConsolidation, QueryTarget};
+use bevy_ecs::prelude::{In, Res};
 use futures_lite::future::race;
 use std::time::Duration;
 use thiserror::Error as ThisError;
@@ -131,8 +127,7 @@ pub enum ZenohQuerierError {
 
 impl DiagramElementRegistry {
     pub(super) fn register_zenoh_querier(&mut self, ensure_session: EnsureZenohSession) {
-        let create_querier = |In(config): In<ZenohQuerierConfig>,
-                              session: Res<ZenohSession>| {
+        let create_querier = |In(config): In<ZenohQuerierConfig>, session: Res<ZenohSession>| {
             let session_promise = session.promise.clone();
             async move {
                 let session = session_promise
@@ -178,60 +173,61 @@ impl DiagramElementRegistry {
                     .take_response()
                     .shared();
 
-                let node = builder.create_map(move |input: AsyncMap<JsonMessage, ZenohNodeStreams>| {
-                    let querier = querier.clone();
-                    let parameters = Arc::clone(&parameters);
-                    let encoder = encoder.clone();
-                    let decoder = decoder.clone();
-                    let (sender, mut cancellation_receiver) = unbounded_channel();
-                    input.streams.canceller.send(sender);
+                let node =
+                    builder.create_map(move |input: AsyncMap<JsonMessage, ZenohNodeStreams>| {
+                        let querier = querier.clone();
+                        let parameters = Arc::clone(&parameters);
+                        let encoder = encoder.clone();
+                        let decoder = decoder.clone();
+                        let (sender, mut cancellation_receiver) = unbounded_channel();
+                        input.streams.canceller.send(sender);
 
-                    async move {
-                        let querying = async move {
-                            let payload = encoder
-                                .encode(input.request)
-                                .map_err(ZenohQuerierError::EncodingError)?;
+                        async move {
+                            let querying = async move {
+                                let payload = encoder
+                                    .encode(input.request)
+                                    .map_err(ZenohQuerierError::EncodingError)?;
 
-                            // SAFETY: There is no mechanism for the querier to be
-                            // taken out of the promise, so it should always be
-                            // available after being awaited.
-                            let querier = querier.await.available().unwrap()?;
-                            let replies = querier
-                                .get()
-                                .parameters(parameters.as_ref().clone())
-                                .encoding(encoder.encoding())
-                                .payload(payload)
-                                .await
-                                .map_err(ArcError::new)?;
+                                // SAFETY: There is no mechanism for the querier to be
+                                // taken out of the promise, so it should always be
+                                // available after being awaited.
+                                let querier = querier.await.available().unwrap()?;
+                                let replies = querier
+                                    .get()
+                                    .parameters(parameters.as_ref().clone())
+                                    .encoding(encoder.encoding())
+                                    .payload(payload)
+                                    .await
+                                    .map_err(ArcError::new)?;
 
-                            while let Ok(reply) = replies.recv_async().await {
-                                let next_sample = match reply.result() {
-                                    Ok(sample) => sample,
-                                    Err(err) => {
-                                        input.streams.out_error.send(format!("{err}"));
-                                        continue;
-                                    }
-                                };
+                                while let Ok(reply) = replies.recv_async().await {
+                                    let next_sample = match reply.result() {
+                                        Ok(sample) => sample,
+                                        Err(err) => {
+                                            input.streams.out_error.send(format!("{err}"));
+                                            continue;
+                                        }
+                                    };
 
-                                match decoder.decode(next_sample) {
-                                    Ok(msg) => {
-                                        input.streams.out.send(msg);
-                                    }
-                                    Err(msg) => {
-                                        input.streams.out_error.send(msg);
+                                    match decoder.decode(next_sample) {
+                                        Ok(msg) => {
+                                            input.streams.out.send(msg);
+                                        }
+                                        Err(msg) => {
+                                            input.streams.out_error.send(msg);
+                                        }
                                     }
                                 }
-                            }
 
-                            Ok::<_, ZenohQuerierError>(JsonMessage::default())
-                        };
-                        let cancel = cancellation_receiver.recv();
-                        race(querying, receive_cancel(cancel)).await
-                    }
-                });
+                                Ok::<_, ZenohQuerierError>(JsonMessage::default())
+                            };
+                            let cancel = cancellation_receiver.recv();
+                            race(querying, receive_cancel(cancel)).await
+                        }
+                    });
 
                 Ok(node)
-            }
+            },
         )
         .with_fork_result();
     }

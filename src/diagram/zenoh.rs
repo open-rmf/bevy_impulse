@@ -38,9 +38,9 @@ use thiserror::Error as ThisError;
 use tokio::sync::mpsc::UnboundedSender;
 use zenoh_ext::z_deserialize;
 
-mod register_zenoh_subscription;
 mod register_zenoh_publisher;
 mod register_zenoh_querier;
+mod register_zenoh_subscription;
 
 impl DiagramElementRegistry {
     /// Add nodes to the registry that allow you to interact with the
@@ -331,9 +331,7 @@ impl Codec {
                     .map_err(|err| decode_error_msg(err, &sample))
             }
             Codec::Bson => {
-                bson::deserialize_from_slice::<JsonMessage>(
-                    sample.payload().to_bytes().as_ref()
-                )
+                bson::deserialize_from_slice::<JsonMessage>(sample.payload().to_bytes().as_ref())
                     .map_err(|err| decode_error_msg(err, &sample))
             }
         }
@@ -342,8 +340,7 @@ impl Codec {
     fn encoding(&self) -> Encoding {
         match self {
             Codec::Protobuf(descriptor) => {
-                Encoding::APPLICATION_PROTOBUF
-                    .with_schema(descriptor.full_name())
+                Encoding::APPLICATION_PROTOBUF.with_schema(descriptor.full_name())
             }
             Codec::Json => Encoding::TEXT_JSON,
             Codec::Bson => Encoding::from("application/bson"),

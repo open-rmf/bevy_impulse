@@ -17,17 +17,12 @@
 
 use super::*;
 
-use bevy_ecs::{
-    prelude::{In, Res, World},
-};
+use bevy_ecs::prelude::{In, Res, World};
 use futures_lite::future::race;
 use std::time::Duration;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc::unbounded_channel;
-use zenoh_ext::{
-    AdvancedSubscriberBuilderExt,
-    HistoryConfig, RecoveryConfig,
-};
+use zenoh_ext::{AdvancedSubscriberBuilderExt, HistoryConfig, RecoveryConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -223,7 +218,11 @@ impl DiagramElementRegistry {
                                 }
                             };
 
-                            race(subscribing, receive_cancel::<ZenohSubscriptionError>(cancel)).await
+                            race(
+                                subscribing,
+                                receive_cancel::<ZenohSubscriptionError>(cancel),
+                            )
+                            .await
                         }
                         .await;
 
