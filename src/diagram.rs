@@ -1303,6 +1303,18 @@ pub(crate) fn is_default<T: std::default::Default + PartialEq>(value: &T) -> boo
     *value == default
 }
 
+/// Used with `#[serde(default = "default_as_true", skip_serializing_if = "is_true")]`
+/// for bools that should be true by default.
+pub(crate) fn default_as_true() -> bool {
+    true
+}
+
+/// Used with `#[serde(default = "default_as_true", skip_serializing_if = "is_true")]`
+/// for bools that should be true by default.
+pub(crate) fn is_true(value: &bool) -> bool {
+    *value
+}
+
 /// This is used to block a future from ever returning. This should only be used
 /// in a race to force one of the contesting futures to lose. Make sure that at
 /// least one contesting future will finish or else this will lead to a deadlock.

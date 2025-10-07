@@ -274,24 +274,24 @@ async fn receive_cancel<E>(
 
 #[derive(Debug, Clone)]
 enum Codec {
-    Protobuf(MessageDescriptor),
     Json,
+    Protobuf(MessageDescriptor),
 }
 
 impl Codec {
-    fn encode(&self, message: JsonMessage) -> Result<ZBytes, String> {
+    fn encode(&self, message: &JsonMessage) -> Result<ZBytes, String> {
         match self {
-            Codec::Protobuf(descriptor) => {
-                let msg = DynamicMessage::deserialize(descriptor.clone(), &message)
-                    .map_err(|err| format!("{err}"))?;
-
-                Ok(ZBytes::from(msg.encode_to_vec()))
-            }
             Codec::Json => {
-                let msg_as_string = serde_json::to_string(&message)
+                let msg_as_string = serde_json::to_string(message)
                     .map_err(|err| format!("{err}"))?;
 
                 Ok(ZBytes::from(msg_as_string))
+            }
+            Codec::Protobuf(descriptor) => {
+                let msg = DynamicMessage::deserialize(descriptor.clone(), message)
+                    .map_err(|err| format!("{err}"))?;
+
+                Ok(ZBytes::from(msg.encode_to_vec()))
             }
         }
     }
@@ -349,6 +349,7 @@ impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
     type Error = ZenohBuildError;
     fn try_from(value: &ZenohEncodingConfig) -> Result<Self, Self::Error> {
         match value {
+            ZenohEncodingConfig::Json => Ok(Codec::Json),
             ZenohEncodingConfig::Protobuf(message_type) => {
                 let descriptors = DescriptorPool::global();
                 let Some(msg) = descriptors.get_message_by_name(&message_type) else {
@@ -360,7 +361,6 @@ impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
 
                 Ok(Codec::Protobuf(msg))
             }
-            ZenohEncodingConfig::Json => Ok(Codec::Json),
         }
     }
 }
@@ -396,13 +396,13 @@ mod tests {
                     }
                 ])
             ],
-            "json",
+            "json".into(),
         );
     }
 
     fn impl_test_zenoh_pub_sub(
         input_messages: Vec<JsonMessage>,
-        codec: &str,
+        codec: JsonMessage,
     ) {
         let mut fixture = DiagramTestFixture::new();
         fixture.registry.enable_zenoh(Default::default());
@@ -427,13 +427,15 @@ mod tests {
                     |input: AsyncMap<Vec<JsonMessage>, SlowSpreadStreams>| {
                         async move {
                             for value in input.request {
-                                let _ = until_timeout(Duration::from_millis(1), NeverFinish).await;
+                                let _ = until_timeout(Duration::from_micros(100), NeverFinish).await;
                                 input.streams.out.send(value);
                             }
                         }
                     }
                 )
             }
+
+
         );
 
         let diagram = Diagram::from_json(json!({
@@ -458,9 +460,14 @@ mod tests {
                     "type": "node",
                     "builder": "zenoh_publisher",
                     "config": {
-                        "key": format!("test_zenoh_pub_sub_key_{}", codec),
+                        "key": "test_zenoh_pub_sub_key",
                         "encoder": codec,
-                        "locality": "session_local"
+                        "locality": "session_local",
+                        "max_samples": 100,
+                        "heartbeat": {
+                            "period": 0.01,
+                            "sporadic": false
+                        }
                     },
                     "next": { "builtin": "dispose" }
                 },
@@ -473,8 +480,12 @@ mod tests {
                     "type": "node",
                     "builder": "zenoh_subscription",
                     "config": {
-                        "key": format!("test_zenoh_pub_sub_key_{}", codec),
+                        "key": "test_zenoh_pub_sub_key",
                         "decoder": codec,
+                        "history": {
+                            "detect_late_publishers": true,
+                            "max_samples": 100
+                        },
                         "locality": "session_local"
                     },
                     "next": { "builtin": "dispose" },
@@ -507,7 +518,11 @@ mod tests {
         }))
         .unwrap();
 
-        let result: Result<(), String> = fixture.spawn_and_run(&diagram, input_messages).unwrap();
+        let result: Result<(), String> = fixture.spawn_and_run_with_conditions(
+            &diagram,
+            input_messages,
+            Duration::from_secs(2),
+        ).unwrap();
         result.unwrap();
     }
 

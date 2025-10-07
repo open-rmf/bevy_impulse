@@ -21,6 +21,8 @@ use bevy_ecs::prelude::{In, Res};
 use std::time::Duration;
 use thiserror::Error as ThisError;
 use zenoh_ext::{AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig, RepliesConfig};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use futures::channel::oneshot::{self, Sender as OneShotSender};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ZenohPublisherConfig {
@@ -83,10 +85,10 @@ impl Default for ZenohPublisherHeartbeatOption {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ZenohPublisherHeartbeatConfig {
     /// How frequently should the heartbeat be published?
-    pub period: Duration,
+    pub period: f64,
     /// Is a sporadic heartbeat allowed? A sporadic heartbeat means the
     /// heartbeat will only be published if the publisher's sequence number has
     /// increased within the latest heartbeat period. This means subscriptions
@@ -98,7 +100,7 @@ pub struct ZenohPublisherHeartbeatConfig {
 impl Default for ZenohPublisherHeartbeatConfig {
     fn default() -> Self {
         Self {
-            period: Duration::from_secs(1),
+            period: 1.0,
             sporadic: false,
         }
     }
@@ -106,10 +108,11 @@ impl Default for ZenohPublisherHeartbeatConfig {
 
 impl From<ZenohPublisherHeartbeatConfig> for MissDetectionConfig {
     fn from(value: ZenohPublisherHeartbeatConfig) -> Self {
+        let period = Duration::from_secs_f64(value.period);
         if value.sporadic {
-            MissDetectionConfig::default().heartbeat(value.period)
+            MissDetectionConfig::default().heartbeat(period)
         } else {
-            MissDetectionConfig::default().sporadic_heartbeat(value.period)
+            MissDetectionConfig::default().sporadic_heartbeat(period)
         }
     }
 }
@@ -129,64 +132,69 @@ pub enum ZenohPublisherError {
     SessionRemoved,
     #[error("error while encoding message: {}", .0)]
     EncodingError(String),
+    #[error("the publisher was dropped while still in use")]
+    PublisherDropped,
     #[error("{}", .0)]
     ZenohError(#[from] ArcError),
 }
 
+type PublishingResult = Result<(), ZenohPublisherError>;
+
+struct PublisherSetup {
+    receiver: UnboundedReceiver<(ZBytes, OneShotSender<PublishingResult>)>,
+    config: ZenohPublisherConfig,
+    encoder: Codec,
+}
+
 impl DiagramElementRegistry {
     pub(super) fn register_zenoh_publisher(&mut self, ensure_session: EnsureZenohSession) {
-        let create_publisher = |In(config): In<ZenohPublisherConfig>,
+        // We run the publisher as its own async job because we noticed an
+        // undesirable behavior in zenoh where multiple simultaneous attempts to
+        // publish a message can cause one of them to be dropped from the history
+        // and not received by a subscription if it starts before another message
+        // and ends after.
+        //
+        // Funneling all the publishing activity into one async job ensures that
+        // multiple uses of the same publisher will never overlap with each other.
+        let run_publisher = |In(PublisherSetup { mut receiver, config, encoder }): In<PublisherSetup>,
                                 session: Res<ZenohSession>| {
             let session_promise = session.promise.clone();
             async move {
-                let session = session_promise
-                    .await
-                    .available()
-                    .map(|r| r.map_err(ZenohPublisherError::ZenohError))
-                    .unwrap_or(Err(ZenohPublisherError::SessionRemoved))?;
+                let publisher = async move {
+                    let session = session_promise
+                        .await
+                        .available()
+                        .map(|r| r.map_err(ZenohPublisherError::ZenohError))
+                        .unwrap_or(Err(ZenohPublisherError::SessionRemoved))?;
 
-                let publisher = session
-                    .declare_publisher(config.key.to_string())
-                    .cache(config.cache_config())
-                    .publisher_detection();
+                    let publisher = session
+                        .declare_publisher(config.key.to_string())
+                        .cache(config.cache_config())
+                        .publisher_detection();
 
-                let publisher = match config.heartbeat {
-                    ZenohPublisherHeartbeatOption::Disable => publisher,
-                    ZenohPublisherHeartbeatOption::Enable(heartbeat) => {
-                        publisher.sample_miss_detection(heartbeat.into())
-                    }
-                };
+                    let publisher = match config.heartbeat {
+                        ZenohPublisherHeartbeatOption::Disable => publisher,
+                        ZenohPublisherHeartbeatOption::Enable(heartbeat) => {
+                            publisher.sample_miss_detection(heartbeat.into())
+                        }
+                    };
 
-                let publisher = publisher.await.map_err(ArcError::new)?;
-                Ok::<_, ZenohPublisherError>(Arc::new(publisher))
-            }
-        };
-        let create_publisher = create_publisher.into_async_callback();
+                    let publisher = publisher.await.map_err(ArcError::new)?;
+                    Ok::<_, ZenohPublisherError>(publisher)
+                }.await;
 
-        self.register_node_builder_fallible(
-            NodeBuilderOptions::new("zenoh_publisher").with_default_display_text("Zenoh Publisher"),
-            move |builder, config: ZenohPublisherConfig| {
-                builder.commands().add(ensure_session.clone());
+                while let Some((payload, responder)) = receiver.recv().await {
+                    // If an error happened while creating the publisher, just
+                    // report that back immediately.
+                    let publisher = match &publisher {
+                        Ok(publisher) => publisher,
+                        Err(err) => {
+                            let _ = responder.send(Err(err.clone()));
+                            continue;
+                        }
+                    };
 
-                let encoder: Codec = (&config.encoder).try_into()?;
-                let publisher = builder
-                    .commands()
-                    .request(config, create_publisher.clone())
-                    .take_response()
-                    .shared();
-
-                let callback = move |message: JsonMessage| {
-                    let publisher = publisher.clone();
-                    let encoder = encoder.clone();
-                    async move {
-                        let payload = encoder
-                            .encode(message)
-                            .map_err(ZenohPublisherError::EncodingError)?;
-
-                        // SAFETY: There is no mechanism for the publisher to
-                        // be taken out of the promise, so it should always be
-                        // available after being awaited.
-                        let publisher = publisher.await.available().unwrap()?;
+                    let r = async {
                         publisher
                             .put(payload)
                             .encoding(encoder.encoding())
@@ -194,6 +202,48 @@ impl DiagramElementRegistry {
                             .map_err(ArcError::new)?;
 
                         Ok::<_, ZenohPublisherError>(())
+                    }.await;
+
+                    let _ = responder.send(r);
+                }
+            }
+        };
+        let run_publisher = run_publisher.into_async_callback();
+
+        self.register_node_builder_fallible(
+            NodeBuilderOptions::new("zenoh_publisher").with_default_display_text("Zenoh Publisher"),
+            move |builder, config: ZenohPublisherConfig| {
+                builder.commands().add(ensure_session.clone());
+
+                let encoder: Codec = (&config.encoder).try_into()?;
+                let (publishing_sender, receiver) = unbounded_channel();
+                let setup = PublisherSetup {
+                    receiver,
+                    config,
+                    encoder: encoder.clone(),
+                };
+
+                builder
+                    .commands()
+                    .request(setup, run_publisher.clone())
+                    .detach();
+
+                let callback = move |message: JsonMessage| {
+                    let publishing_sender = publishing_sender.clone();
+                    let encoder = encoder.clone();
+                    async move {
+                        let payload = encoder
+                            .encode(&message)
+                            .map_err(ZenohPublisherError::EncodingError)?;
+
+                        let (sender, receiver) = oneshot::channel();
+                        publishing_sender.send((payload, sender))
+                            .map_err(|_| ZenohPublisherError::PublisherDropped)?;
+
+                        receiver
+                        .await
+                        .or(Err(ZenohPublisherError::PublisherDropped))
+                        .flatten()
                     }
                 };
 

@@ -46,7 +46,7 @@ pub struct ZenohSubscriptionConfig {
 #[serde(rename_all = "snake_case")]
 pub struct ZenohSubscriptionHistoryConfig {
     /// Enable detection of late joiner publishers and query for their historical data.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
     pub detect_late_publishers: bool,
     /// Specify how many samples to query for each resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]

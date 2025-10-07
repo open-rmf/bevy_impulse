@@ -4,9 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
-    StreamPack,
+    testing::TestingContext, Builder, JsonMessage, RequestExt,
+    RunCommandsOnWorldExt, Service, StreamPack,
 };
+
+pub use crate::testing::FlushConditions;
 
 use super::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions};
 
@@ -68,7 +70,20 @@ impl DiagramTestFixture {
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
     {
-        self.spawn_and_run_with_streams::<_, _, ()>(diagram, request)
+        self.spawn_and_run_with_conditions(diagram, request, FlushConditions::default())
+    }
+
+    pub fn spawn_and_run_with_conditions<Request, Response>(
+        &mut self,
+        diagram: &Diagram,
+        request: Request,
+        conditions: impl Into<FlushConditions>,
+    ) -> Result<Response, Box<dyn Error>>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        self.spawn_and_run_with_streams::<_, _, ()>(diagram, request, conditions)
             .map(|(response, _)| response)
     }
 
@@ -76,6 +91,7 @@ impl DiagramTestFixture {
         &mut self,
         diagram: &Diagram,
         request: Request,
+        conditions: impl Into<FlushConditions>,
     ) -> Result<(Response, Streams::StreamReceivers), Box<dyn Error>>
     where
         Request: 'static + Send + Sync,
@@ -86,7 +102,7 @@ impl DiagramTestFixture {
         let mut recipient = self
             .context
             .command(|cmds| cmds.request(request, workflow).take());
-        self.context.run_while_pending(&mut recipient.response);
+        self.context.run_with_conditions(&mut recipient.response, conditions);
         assert!(
             self.context.no_unhandled_errors(),
             "{:#?}",

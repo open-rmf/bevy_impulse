@@ -185,7 +185,7 @@ impl DiagramElementRegistry {
                         async move {
                             let querying = async move {
                                 let payload = encoder
-                                    .encode(input.request)
+                                    .encode(&input.request)
                                     .map_err(ZenohQuerierError::EncodingError)?;
 
                                 // SAFETY: There is no mechanism for the querier to be
