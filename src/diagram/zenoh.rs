@@ -463,7 +463,8 @@ mod tests {
                         "heartbeat": {
                             "period": 0.01,
                             "sporadic": false
-                        }
+                        },
+                        "ordering": "strict"
                     },
                     "next": { "builtin": "dispose" }
                 },
@@ -567,20 +568,15 @@ mod tests {
             )));
         }
 
-        for expected_value in expectation {
-            // NOTE: zenoh seems willing to send messages out of their original
-            // order, and there doesn't seem to be any way to enforce that messages
-            // arrive in order, so we can't make any assumptions about ordering
-            // when we check for the expected messages.
-            if actual
-                .iter()
-                .find(|actual_value| *actual_value == expected_value)
-                .is_some()
-            {
-                continue;
+        for (i, (expected_value, actual_value)) in expectation.iter().zip(actual.iter()).enumerate()
+        {
+            if expected_value != actual_value {
+                return Ok(Err(format!(
+                    "Incorrect message at index {i}:\
+                    \n - expected: {expected_value:?} \
+                    \n - received: {actual_value:?}"
+                )));
             }
-
-            return Ok(Err(format!("Expected message missing: {expected_value:?}")));
         }
 
         Ok(Ok(()))

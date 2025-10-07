@@ -18,7 +18,7 @@
 use super::*;
 
 use bevy_ecs::prelude::{In, Res};
-use futures::channel::oneshot::{self, Sender as OneShotSender};
+use futures::channel::oneshot::{self, Receiver as OneShotReceiver, Sender as OneShotSender};
 use std::time::Duration;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -49,6 +49,8 @@ pub struct ZenohPublisherConfig {
     pub reliability: ZenohPublisherReliability,
     #[serde(default, skip_serializing_if = "is_default")]
     pub locality: ZenohLocalityConfig,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub ordering: OrderingConfig,
 }
 
 impl ZenohPublisherConfig {
@@ -68,6 +70,26 @@ impl ZenohPublisherConfig {
             .priority(self.priority.into())
             .express(self.express)
     }
+}
+
+/// How strict should the publishing order be for messages sent into a publisher?
+/// This ordering also applies for independent sessions of the same workflow since
+/// all sessions of the same workflow will use the same publisher. You can prevent
+/// this interdependence if you spawn a separate workflow for each session.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderingConfig {
+    /// Guarantee that messages get published in the order that they arrive at
+    /// the publisher node. This means encoding and publishing will both be done
+    /// serially, so encoding large messages will be a bottleneck for all other
+    /// messages.
+    #[default]
+    Strict,
+    /// Message ordering is not considered as important, so messages will be
+    /// encoded in parallel and sent for publication as soon as they are ready,
+    /// no matter what order they arrived at the publisher node. All messages
+    /// will be published, but they might arrive at the subscription out of order.
+    Loose,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -141,9 +163,25 @@ pub enum ZenohPublisherError {
 type PublishingResult = Result<(), ZenohPublisherError>;
 
 struct PublisherSetup {
-    receiver: UnboundedReceiver<(ZBytes, OneShotSender<PublishingResult>)>,
+    receiver: UnboundedReceiver<(Payload, OneShotSender<PublishingResult>)>,
     config: ZenohPublisherConfig,
     encoder: Codec,
+}
+
+enum Payload {
+    Encoded(ZBytes),
+    Unencoded(JsonMessage),
+}
+
+impl Payload {
+    fn encode(self, encoder: &Codec) -> Result<ZBytes, ZenohPublisherError> {
+        match self {
+            Self::Encoded(bytes) => Ok(bytes),
+            Self::Unencoded(msg) => encoder
+                .encode(&msg)
+                .map_err(ZenohPublisherError::EncodingError),
+        }
+    }
 }
 
 impl DiagramElementRegistry {
@@ -200,6 +238,8 @@ impl DiagramElementRegistry {
                     };
 
                     let r = async {
+                        let payload = payload.encode(&encoder)?;
+
                         publisher
                             .put(payload)
                             .encoding(encoder.encoding())
@@ -222,6 +262,7 @@ impl DiagramElementRegistry {
                 builder.commands().add(ensure_session.clone());
 
                 let encoder: Codec = (&config.encoder).try_into()?;
+                let ordering = config.ordering;
                 let (publishing_sender, receiver) = unbounded_channel();
                 let setup = PublisherSetup {
                     receiver,
@@ -237,15 +278,36 @@ impl DiagramElementRegistry {
                 let callback = move |message: JsonMessage| {
                     let publishing_sender = publishing_sender.clone();
                     let encoder = encoder.clone();
-                    async move {
-                        let payload = encoder
-                            .encode(&message)
-                            .map_err(ZenohPublisherError::EncodingError)?;
 
-                        let (sender, receiver) = oneshot::channel();
-                        publishing_sender
-                            .send((payload, sender))
-                            .map_err(|_| ZenohPublisherError::PublisherDropped)?;
+                    let work = match ordering {
+                        OrderingConfig::Strict => {
+                            let (sender, receiver) = oneshot::channel();
+                            let receiver = publishing_sender
+                                .send((Payload::Unencoded(message), sender))
+                                .map(|_| receiver)
+                                .map_err(|_| ZenohPublisherError::PublisherDropped);
+
+                            PublisherWork::Strict(receiver)
+                        }
+                        OrderingConfig::Loose => PublisherWork::Loose(message),
+                    };
+
+                    async move {
+                        let receiver = match work {
+                            PublisherWork::Strict(receiver) => receiver?,
+                            PublisherWork::Loose(message) => {
+                                let payload = encoder
+                                    .encode(&message)
+                                    .map_err(ZenohPublisherError::EncodingError)?;
+
+                                let (sender, receiver) = oneshot::channel();
+                                publishing_sender
+                                    .send((Payload::Encoded(payload), sender))
+                                    .map_err(|_| ZenohPublisherError::PublisherDropped)?;
+
+                                receiver
+                            }
+                        };
 
                         receiver
                             .await
@@ -258,4 +320,14 @@ impl DiagramElementRegistry {
             },
         );
     }
+}
+
+/// This enum allows the user to choose whether message encoding should be done
+/// serially (allowing bottlenecks) or in parallel (allowing messages to arrive
+/// out of order). Rust's async syntax forces one final async block to be returned
+/// by the node callback, so this enum allows us to have that one block behave in
+/// two different ways depending on what the user selected.
+enum PublisherWork {
+    Strict(Result<OneShotReceiver<Result<(), ZenohPublisherError>>, ZenohPublisherError>),
+    Loose(JsonMessage),
 }
