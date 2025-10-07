@@ -18,11 +18,11 @@
 use super::*;
 
 use bevy_ecs::prelude::{In, Res};
+use futures::channel::oneshot::{self, Sender as OneShotSender};
 use std::time::Duration;
 use thiserror::Error as ThisError;
-use zenoh_ext::{AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig, RepliesConfig};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use futures::channel::oneshot::{self, Sender as OneShotSender};
+use zenoh_ext::{AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig, RepliesConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ZenohPublisherConfig {
@@ -156,8 +156,12 @@ impl DiagramElementRegistry {
         //
         // Funneling all the publishing activity into one async job ensures that
         // multiple uses of the same publisher will never overlap with each other.
-        let run_publisher = |In(PublisherSetup { mut receiver, config, encoder }): In<PublisherSetup>,
-                                session: Res<ZenohSession>| {
+        let run_publisher = |In(PublisherSetup {
+                                 mut receiver,
+                                 config,
+                                 encoder,
+                             }): In<PublisherSetup>,
+                             session: Res<ZenohSession>| {
             let session_promise = session.promise.clone();
             async move {
                 let publisher = async move {
@@ -181,7 +185,8 @@ impl DiagramElementRegistry {
 
                     let publisher = publisher.await.map_err(ArcError::new)?;
                     Ok::<_, ZenohPublisherError>(publisher)
-                }.await;
+                }
+                .await;
 
                 while let Some((payload, responder)) = receiver.recv().await {
                     // If an error happened while creating the publisher, just
@@ -202,7 +207,8 @@ impl DiagramElementRegistry {
                             .map_err(ArcError::new)?;
 
                         Ok::<_, ZenohPublisherError>(())
-                    }.await;
+                    }
+                    .await;
 
                     let _ = responder.send(r);
                 }
@@ -237,13 +243,14 @@ impl DiagramElementRegistry {
                             .map_err(ZenohPublisherError::EncodingError)?;
 
                         let (sender, receiver) = oneshot::channel();
-                        publishing_sender.send((payload, sender))
+                        publishing_sender
+                            .send((payload, sender))
                             .map_err(|_| ZenohPublisherError::PublisherDropped)?;
 
                         receiver
-                        .await
-                        .or(Err(ZenohPublisherError::PublisherDropped))
-                        .flatten()
+                            .await
+                            .or(Err(ZenohPublisherError::PublisherDropped))
+                            .flatten()
                     }
                 };
 

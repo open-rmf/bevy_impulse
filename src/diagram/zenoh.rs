@@ -282,8 +282,8 @@ impl Codec {
     fn encode(&self, message: &JsonMessage) -> Result<ZBytes, String> {
         match self {
             Codec::Json => {
-                let msg_as_string = serde_json::to_string(message)
-                    .map_err(|err| format!("{err}"))?;
+                let msg_as_string =
+                    serde_json::to_string(message).map_err(|err| format!("{err}"))?;
 
                 Ok(ZBytes::from(msg_as_string))
             }
@@ -318,7 +318,9 @@ impl Codec {
                 value.map_err(|err| decode_error_msg(err, &sample))
             }
             Codec::Json => {
-                let payload = sample.payload().try_to_string()
+                let payload = sample
+                    .payload()
+                    .try_to_string()
                     .map_err(|err| decode_error_msg(err, &sample))?;
 
                 serde_json::from_str::<JsonMessage>(&payload)
@@ -374,8 +376,8 @@ mod tests {
     use super::*;
     use crate::{diagram::testing::*, testing::*};
     use async_std::future::timeout as until_timeout;
-    use std::time::Instant;
     use serde_json::json;
+    use std::time::Instant;
 
     #[test]
     fn test_zenoh_pub_sub() {
@@ -394,20 +396,18 @@ mod tests {
                         "object": "value",
                         "with": "fields"
                     }
-                ])
+                ]),
             ],
             "json".into(),
         );
     }
 
-    fn impl_test_zenoh_pub_sub(
-        input_messages: Vec<JsonMessage>,
-        codec: JsonMessage,
-    ) {
+    fn impl_test_zenoh_pub_sub(input_messages: Vec<JsonMessage>, codec: JsonMessage) {
         let mut fixture = DiagramTestFixture::new();
         fixture.registry.enable_zenoh(Default::default());
 
-        fixture.registry
+        fixture
+            .registry
             .opt_out()
             .no_serializing()
             .no_deserializing()
@@ -415,7 +415,7 @@ mod tests {
                 NodeBuilderOptions::new("wait_for_matching"),
                 |builder, _config: ()| {
                     builder.create_node(wait_for_matching.into_blocking_callback())
-                }
+                },
             )
             .with_listen()
             .with_fork_result();
@@ -424,18 +424,14 @@ mod tests {
             NodeBuilderOptions::new("slow_spread"),
             |builder, _config: ()| {
                 builder.create_map(
-                    |input: AsyncMap<Vec<JsonMessage>, SlowSpreadStreams>| {
-                        async move {
-                            for value in input.request {
-                                let _ = until_timeout(Duration::from_micros(100), NeverFinish).await;
-                                input.streams.out.send(value);
-                            }
+                    |input: AsyncMap<Vec<JsonMessage>, SlowSpreadStreams>| async move {
+                        for value in input.request {
+                            let _ = until_timeout(Duration::from_micros(100), NeverFinish).await;
+                            input.streams.out.send(value);
                         }
-                    }
+                    },
                 )
-            }
-
-
+            },
         );
 
         let diagram = Diagram::from_json(json!({
@@ -518,17 +514,15 @@ mod tests {
         }))
         .unwrap();
 
-        let result: Result<(), String> = fixture.spawn_and_run_with_conditions(
-            &diagram,
-            input_messages,
-            Duration::from_secs(2),
-        ).unwrap();
+        let result: Result<(), String> = fixture
+            .spawn_and_run_with_conditions(&diagram, input_messages, Duration::from_secs(2))
+            .unwrap();
         result.unwrap();
     }
 
     #[derive(StreamPack)]
     struct SlowSpreadStreams {
-        out: JsonMessage
+        out: JsonMessage,
     }
 
     #[derive(Accessor, Clone)]
@@ -578,7 +572,11 @@ mod tests {
             // order, and there doesn't seem to be any way to enforce that messages
             // arrive in order, so we can't make any assumptions about ordering
             // when we check for the expected messages.
-            if actual.iter().find(|actual_value| *actual_value == expected_value).is_some() {
+            if actual
+                .iter()
+                .find(|actual_value| *actual_value == expected_value)
+                .is_some()
+            {
                 continue;
             }
 

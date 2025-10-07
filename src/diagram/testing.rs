@@ -4,8 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    testing::TestingContext, Builder, JsonMessage, RequestExt,
-    RunCommandsOnWorldExt, Service, StreamPack,
+    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
+    StreamPack,
 };
 
 pub use crate::testing::FlushConditions;
@@ -102,7 +102,8 @@ impl DiagramTestFixture {
         let mut recipient = self
             .context
             .command(|cmds| cmds.request(request, workflow).take());
-        self.context.run_with_conditions(&mut recipient.response, conditions);
+        self.context
+            .run_with_conditions(&mut recipient.response, conditions);
         assert!(
             self.context.no_unhandled_errors(),
             "{:#?}",
