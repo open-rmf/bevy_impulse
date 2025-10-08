@@ -18,13 +18,7 @@
 use super::*;
 use crate::AsyncMap;
 
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 
@@ -46,13 +40,8 @@ use serde::{Deserialize, Serialize};
 
 use tokio::runtime::Runtime;
 
-use futures::{
-    channel::oneshot::{self, Sender as OneShotSender},
-    never::Never,
-    stream::once,
-    FutureExt, Stream as FutureStream,
-};
-use tokio::sync::mpsc::UnboundedReceiver;
+use futures::{stream::once, FutureExt, Stream as FutureStream};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use futures_lite::future::race;
 
@@ -69,7 +58,7 @@ pub struct GrpcConfig {
 #[derive(StreamPack)]
 pub struct GrpcStreams {
     out: JsonMessage,
-    canceller: OneShotSender<Option<String>>,
+    canceller: UnboundedSender<Option<String>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -190,14 +179,17 @@ impl DiagramElementRegistry {
                 },
             )
             .with_fork_result();
+
+        // TODO(@mxgrey): Support dynamic gRPC requests whose configurations are
+        // decided within the workflow and passed into the node as input.
     }
 }
 
-async fn receive_cancel<T, E>(
-    receiver: impl Future<Output = Result<Option<String>, E>>,
+async fn receive_cancel<T>(
+    receiver: impl Future<Output = Option<Option<String>>>,
 ) -> Result<T, Status> {
     match receiver.await {
-        Ok(msg) => {
+        Some(msg) => {
             // The user sent a signal to cancel this request
             let msg = if let Some(msg) = msg {
                 format!("cancelled: {msg}")
@@ -207,7 +199,7 @@ async fn receive_cancel<T, E>(
 
             return Err::<T, _>(Status::new(Code::Cancelled, msg));
         }
-        Err(_) => {
+        None => {
             // The sender for the cancellation signal was dropped
             // so we must never let this future finish.
             NeverFinish.await;
@@ -298,10 +290,10 @@ where
     }
 
     // Set up cancellation channel
-    let (sender, receiver) = oneshot::channel();
+    let (sender, mut receiver) = unbounded_channel();
     output_streams.canceller.send(sender);
 
-    let cancel = receiver.shared();
+    let cancel = receiver.recv().shared();
 
     let session = client.streaming(request, path, codec);
     let cancellable_session = race(session, receive_cancel(cancel.clone()));
@@ -406,22 +398,11 @@ impl Decoder for DynamicMessageCodec {
     }
 }
 
-/// This is used to block a future from ever returning. This should only be used
-/// in a race to force one of the contesting futures to lose. Make sure that at
-/// least one contesting future will finish or else this will lead to a deadlock.
-struct NeverFinish;
-
-impl Future for NeverFinish {
-    type Output = Never;
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Pending
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{diagram::testing::*, prelude::*, testing::*};
+    use futures::channel::oneshot::{self, Sender as OneShotSender};
     use prost_reflect::Kind;
     use protos::{
         fibonacci_server::{Fibonacci, FibonacciServer},
@@ -949,14 +930,6 @@ mod tests {
                 runtime,
             }
         }
-    }
-
-    fn clamp(val: f32, limit: f32) -> f32 {
-        if f32::abs(val) > limit {
-            return f32::signum(val) * limit;
-        }
-
-        val
     }
 
     type NavigationUpdateSender = UnboundedSender<Result<NavigationUpdate, Status>>;

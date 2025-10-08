@@ -271,7 +271,6 @@ mod tests {
                         "foo": "foo_buffer",
                         "bar": "bar_buffer",
                     },
-                    "target_node": "foobar",
                     "next": "foobar",
                 },
                 "foobar": {
@@ -432,7 +431,6 @@ mod tests {
                 "join": {
                     "type": "join",
                     "buffers": ["foo_buffer", "bar_buffer"],
-                    "target_node": "foobar_array",
                     "next": "foobar_array",
                 },
                 "foobar_array": {
@@ -466,7 +464,6 @@ mod tests {
                 "join": {
                     "type": "join",
                     "buffers": [],
-                    "target_node": "foobar",
                     "next": "foobar",
                 },
                 "foobar": {

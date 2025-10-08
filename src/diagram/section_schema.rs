@@ -492,15 +492,6 @@ mod tests {
         );
     }
 
-    struct OpaqueMessage;
-
-    /// A test compile that opaque messages can be used in sections.
-    #[derive(Section)]
-    struct TestSectionNoDeserialize {
-        #[message(no_deserialize, no_serialize, no_clone)]
-        msg: InputSlot<OpaqueMessage>,
-    }
-
     #[derive(Section)]
     struct TestSectionUnzip {
         input: InputSlot<()>,

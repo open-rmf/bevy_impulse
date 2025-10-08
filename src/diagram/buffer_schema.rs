@@ -82,7 +82,6 @@ use super::{
 ///         "buffer_access": {
 ///             "type": "buffer_access",
 ///             "buffers": ["string_buffer"],
-///             "target_node": "with_buffer_access",
 ///             "next": "with_buffer_access"
 ///         },
 ///         "with_buffer_access": {
@@ -175,7 +174,6 @@ impl BuildDiagramOperation for BufferSchema {
 ///         "buffer_access": {
 ///             "type": "buffer_access",
 ///             "buffers": ["string_buffer"],
-///             "target_node": "with_buffer_access",
 ///             "next": "with_buffer_access"
 ///         },
 ///         "with_buffer_access": {
@@ -263,7 +261,6 @@ where
 ///         "listen": {
 ///             "type": "listen",
 ///             "buffers": ["buffer"],
-///             "target_node": "listen_buffer",
 ///             "next": "listen_buffer"
 ///         },
 ///         "listen_buffer": {
@@ -279,12 +276,8 @@ where
 #[serde(rename_all = "snake_case")]
 pub struct ListenSchema {
     pub(super) next: NextOperation,
-
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferSelection,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<NextOperation>,
 }
 
 impl BuildDiagramOperation for ListenSchema {
@@ -506,7 +499,6 @@ mod tests {
                 "join": {
                     "type": "join",
                     "buffers": ["buffer"],
-                    "target_node": "op1",
                     "next": "op1",
                 },
                 "op1": {
@@ -584,7 +576,6 @@ mod tests {
                 "listen": {
                     "type": "listen",
                     "buffers": ["buffer"],
-                    "target_node": "wait_2_strings",
                     "next": "wait_2_strings",
                 },
                 "wait_2_strings": {
@@ -642,7 +633,6 @@ mod tests {
                 "buffer_access": {
                     "type": "buffer_access",
                     "buffers": ["string_buffer"],
-                    "target_node": "with_buffer_access",
                     "next": "with_buffer_access",
                 },
                 "with_buffer_access": {
@@ -854,7 +844,6 @@ mod tests {
                 "listen": {
                     "type": "listen",
                     "buffers": ["buffer"],
-                    "target_node": "listen_buffer",
                     "next": "listen_buffer",
                 },
                 "listen_buffer": {

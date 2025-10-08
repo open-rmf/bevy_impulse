@@ -545,7 +545,11 @@ mod tests {
         ];
 
         let (_, receivers) = fixture
-            .spawn_and_run_with_streams::<_, (), TestStreamPack>(&diagram, request)
+            .spawn_and_run_with_streams::<_, (), TestStreamPack>(
+                &diagram,
+                request,
+                FlushConditions::default(),
+            )
             .unwrap();
 
         let outcome_stream_u32 = collect_received_values(receivers.stream_u32);

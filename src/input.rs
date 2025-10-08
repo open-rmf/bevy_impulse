@@ -20,6 +20,8 @@ use bevy_ecs::{
     system::Command,
     world::{EntityRef, EntityWorldMut, World},
 };
+
+#[cfg(feature = "trace")]
 use bevy_hierarchy::Parent;
 
 use smallvec::SmallVec;
