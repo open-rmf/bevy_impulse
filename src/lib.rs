@@ -133,6 +133,11 @@ pub use provider::*;
 pub mod request;
 pub use request::*;
 
+#[cfg(feature = "ros2")]
+pub mod ros2;
+#[cfg(feature = "ros2")]
+pub use ros2::*;
+
 pub mod service;
 pub use service::*;
 

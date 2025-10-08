@@ -5,6 +5,60 @@
 [![Crates.io Version](https://img.shields.io/crates/v/bevy_impulse)](https://crates.io/crates/bevy_impulse)
 
 
+> [!IMPORTANT]
+> You are on a branch with experimental support for ROS 2 via [`rclrs`](https://github.com/ros2-rust/ros2_rust).
+> This will require more steps to set up than usual, so installation instructions for the necessary packages are below:
+
+1. Install ROS Jazzy according to the [normal installation instructions](https://docs.ros.org/en/jazzy/Installation.html).
+
+2. Install Rust according to the [normal installation instructions](https://www.rust-lang.org/tools/install).
+
+3. Run these commands to set up the workspace with the message bindings:
+
+```bash
+sudo apt install -y git libclang-dev python3-pip python3-vcstool # libclang-dev is required by bindgen
+```
+
+```bash
+pip install git+https://github.com/colcon/colcon-cargo.git --break-system-packages
+```
+
+```bash
+pip install git+https://github.com/colcon/colcon-ros-cargo.git --break-system-packages
+```
+
+Create a workspace with the necessary repos:
+
+```bash
+mkdir -p workspace/src && cd workspace
+```
+
+```bash
+git clone https://github.com/open-rmf/bevy_impulse src/bevy_impulse -b ros2
+```
+
+```bash
+vcs import src < src/bevy_impulse/ros2-feature.repos
+```
+
+Source the ROS distro and build the workspace:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+```bash
+colcon build
+```
+
+4. After `colcon build` has finished, you should see a `.cargo/config.toml` file inside your workspace, with `[patch.crates-io.___]` sections pointing to the generated message bindings. Now you should source the workspace using
+
+```bash
+source install/setup.bash
+```
+
+Now you can run the [ROS 2 example](examples/ros2/README.md). You can also create your own crate in this colcon workspace and link as shown in the example.
+
 # Reactive Programming for Bevy
 
 This library provides sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS. In addition to supporting one-shot chains of async operations, it can support reusable workflows with parallel branches, synchronization, races, and cycles. These workflows can be hierarchical, so a workflow can be used as a building block by other workflows.
