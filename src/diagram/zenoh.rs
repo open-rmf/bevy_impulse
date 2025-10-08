@@ -641,7 +641,8 @@ mod tests {
             commands
                 .serve(async {
                     let session = ::zenoh::open(::zenoh::Config::default()).await.unwrap();
-                    let queryable = session.declare_queryable(format!("{NAV_KEY}/*")).await.unwrap();
+
+                    let queryable = session.declare_queryable(NAV_KEY).await.unwrap();
 
                     let decoder: Codec = (&ZenohEncodingConfig::Protobuf(NAV_GOAL_MSG.into()))
                         .try_into()
@@ -651,40 +652,19 @@ mod tests {
                         .try_into()
                         .unwrap();
 
-                    let mut x: f32 = 0.0;
-                    let mut y: f32 = 0.0;
                     while let Ok(query) = queryable.recv_async().await {
-                        println!(" ----------- QUERY RECEIVED ----------------- ");
                         let payload = decoder.decode_payload(query.payload().unwrap()).unwrap();
                         let goal_x = payload["x"].as_f64().unwrap() as f32;
                         let goal_y = payload["y"].as_f64().unwrap() as f32;
-                        let mut count = 0;
-                        loop {
-                            let _ = until_timeout(Duration::from_millis(100), NeverFinish).await;
-                            println!(" - waited 100ms");
 
-                            let delta_x = clamp(goal_x - x, 1.0);
-                            x += delta_x;
-
-                            let delta_y = clamp(goal_y - y, 1.0);
-                            y += delta_y;
-
-                            let msg = json!({
-                                "x": x,
-                                "y": y,
-                                "yaw": 0.0,
-                            });
-                            let reply = encoder.encode(&msg).unwrap();
-
-                            println!(" {msg} ===> sent");
-                            query.reply(format!("{NAV_KEY}/{count}"), reply).await.unwrap();
-                            count += 1;
-
-                            if f32::abs(delta_x) < 1e-3 && f32::abs(delta_y) < 1e-3 {
-                                println!("--------- QUERYABLE FINISHED -----------");
-                                break;
-                            }
-                        }
+                        let _ = until_timeout(Duration::from_millis(1), NeverFinish).await;
+                        let msg = json!({
+                            "x": goal_x,
+                            "y": goal_y,
+                            "yaw": 0.0,
+                        });
+                        let reply = encoder.encode(&msg).unwrap();
+                        query.reply(NAV_KEY, reply).await.unwrap();
                     }
                 })
                 .detach();
@@ -717,7 +697,7 @@ mod tests {
                     "type": "node",
                     "builder": "zenoh_querier",
                     "config": {
-                        "key": format!("{NAV_KEY}/*"),
+                        "key": NAV_KEY,
                         "encoder": { "protobuf": NAV_GOAL_MSG },
                         "decoder": { "protobuf": NAV_UPDATE_MSG }
                     },

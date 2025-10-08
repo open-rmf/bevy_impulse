@@ -234,31 +234,21 @@ impl DiagramElementRegistry {
                                     .await
                                     .map_err(ArcError::new)?;
 
-                                loop {
-                                    match replies.recv_async().await {
-                                        Ok(reply) => {
-                                            let next_sample = match reply.result() {
-                                                Ok(sample) => sample,
-                                                Err(err) => {
-                                                    input.streams.out_error.send(format!("{err}"));
-                                                    continue;
-                                                }
-                                            };
-
-                                            match decoder.decode(next_sample) {
-                                                Ok(msg) => {
-                                                    println!(" received ===> {msg}");
-                                                    input.streams.out.send(msg);
-                                                }
-                                                Err(msg) => {
-                                                    println!(" --!! {msg}");
-                                                    input.streams.out_error.send(msg);
-                                                }
-                                            }
-                                        }
+                                while let Ok(reply) = replies.recv_async().await {
+                                    let next_sample = match reply.result() {
+                                        Ok(sample) => sample,
                                         Err(err) => {
-                                            println!(" --!! Error while receiving reply: {err}");
-                                            break;
+                                            input.streams.out_error.send(format!("{err}"));
+                                            continue;
+                                        }
+                                    };
+
+                                    match decoder.decode(next_sample) {
+                                        Ok(msg) => {
+                                            input.streams.out.send(msg);
+                                        }
+                                        Err(msg) => {
+                                            input.streams.out_error.send(msg);
                                         }
                                     }
                                 }
