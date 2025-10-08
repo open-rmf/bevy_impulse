@@ -652,19 +652,42 @@ mod tests {
                         .try_into()
                         .unwrap();
 
+                    let mut x = 0.0;
+                    let mut y = 0.0;
                     while let Ok(query) = queryable.recv_async().await {
                         let payload = decoder.decode_payload(query.payload().unwrap()).unwrap();
                         let goal_x = payload["x"].as_f64().unwrap() as f32;
                         let goal_y = payload["y"].as_f64().unwrap() as f32;
 
-                        let _ = until_timeout(Duration::from_millis(1), NeverFinish).await;
-                        let msg = json!({
-                            "x": goal_x,
-                            "y": goal_y,
-                            "yaw": 0.0,
-                        });
-                        let reply = encoder.encode(&msg).unwrap();
-                        query.reply(NAV_KEY, reply).await.unwrap();
+                        println!(" ------- BEGIN QUERY -------- ");
+                        loop {
+                            let _ = until_timeout(Duration::from_millis(1), NeverFinish).await;
+                            let msg = json!({
+                                "x": goal_x,
+                                "y": goal_y,
+                                "yaw": 0.0,
+                            });
+
+                            println!(" {msg} ===> sent");
+                            let reply = encoder.encode(&msg).unwrap();
+                            query
+                                .reply(NAV_KEY, reply)
+                                .congestion_control(CongestionControl::Block)
+                                .express(true)
+                                .await.unwrap();
+
+                            let delta_x = clamp(goal_x - x, 1.0);
+                            x += delta_x;
+
+                            let delta_y = clamp(goal_y - y, 1.0);
+                            y += delta_y;
+
+                            if f32::abs(delta_x) < 1e-3 && f32::abs(delta_y) < 1e-3 {
+                                // We have reached the goal
+                                break;
+                            }
+                        }
+                        println!(" ------- FINISH QUERY -------- ");
                     }
                 })
                 .detach();
@@ -699,7 +722,10 @@ mod tests {
                     "config": {
                         "key": NAV_KEY,
                         "encoder": { "protobuf": NAV_GOAL_MSG },
-                        "decoder": { "protobuf": NAV_UPDATE_MSG }
+                        "decoder": { "protobuf": NAV_UPDATE_MSG },
+                        "consolidation": "none",
+                        "congestion_control": "block",
+                        "express": true
                     },
                     "stream_out": { "out": "position" },
                     "next": "nav_done"

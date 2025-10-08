@@ -245,6 +245,7 @@ impl DiagramElementRegistry {
 
                                     match decoder.decode(next_sample) {
                                         Ok(msg) => {
+                                            println!(" received ===> {msg}");
                                             input.streams.out.send(msg);
                                         }
                                         Err(msg) => {
