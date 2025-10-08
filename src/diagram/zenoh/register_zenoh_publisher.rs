@@ -194,6 +194,10 @@ impl DiagramElementRegistry {
         //
         // Funneling all the publishing activity into one async job ensures that
         // multiple uses of the same publisher will never overlap with each other.
+        //
+        // We could examine what effect the congestion control setting may have
+        // on this behavior. Perhaps we don't to funnel like this if congestion
+        // control is set to Block.
         let run_publisher = |In(PublisherSetup {
                                  mut receiver,
                                  config,

@@ -276,6 +276,7 @@ where
         if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
+
         SingleInputStorage::is_reachable(&mut reachability)
     }
 }

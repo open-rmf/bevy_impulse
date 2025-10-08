@@ -17,7 +17,7 @@
 
 use super::*;
 
-use ::zenoh::query::{ConsolidationMode, Parameters, QueryConsolidation, QueryTarget};
+use ::zenoh::query::{ConsolidationMode, Parameters, Querier, QueryConsolidation, QueryTarget};
 use bevy_ecs::prelude::{In, Res};
 use futures_lite::future::race;
 use std::time::Duration;
@@ -51,13 +51,37 @@ pub struct ZenohQuerierConfig {
     pub locality: ZenohLocalityConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<Duration>,
-    /// If true, the replies that are sent through the out-stream will be a
-    /// JSON Object with two fields: `replier_id` and `payload`.
-    ///
-    /// If false (default), the data sent through the out-stream will only
-    /// contain the payload.
     #[serde(default, skip_serializing_if = "is_default")]
-    pub include_replier_id: bool,
+    pub wait_for_matching: WaitForMatching,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitForMatching {
+    /// Never wait for a matching queryable before sending off a query. This has
+    /// a risk of having your querier immediately yield nothing and quitting when
+    /// it gets triggered.
+    Never,
+    /// Wait for a matching queryable right after constructing the querier. This
+    /// will make sure a matching queryable exists before the first time that
+    /// you send out a query, but it will never check again after that, meaning
+    /// your queries could start getting dropped if the queryables ever close.
+    Once,
+    /// Wait for a matching queryable every time you attempt a query. This is
+    /// the safest way to ensure that your query arrives somewhere, but it has
+    /// the penalty of doing extra work for each query that you send.
+    #[default]
+    Always,
+}
+
+impl WaitForMatching {
+    pub fn once(&self) -> bool {
+        matches!(self, Self::Once)
+    }
+
+    pub fn always(&self) -> bool {
+        matches!(self, Self::Always)
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -152,6 +176,11 @@ impl DiagramElementRegistry {
                 };
 
                 let querier = querier.await.map_err(ArcError::new)?;
+
+                if config.wait_for_matching.once() {
+                    wait_for_matching(&querier).await?;
+                }
+
                 Ok::<_, ZenohQuerierError>(Arc::new(querier))
             }
         };
@@ -166,6 +195,7 @@ impl DiagramElementRegistry {
                 let decoder: Codec = (&config.decoder).try_into()?;
                 let parameters = std::mem::replace(&mut config.parameters, Default::default());
                 let parameters: Arc<Parameters> = Arc::new(parameters.into());
+                let wait_choice = config.wait_for_matching;
 
                 let querier = builder
                     .commands()
@@ -192,6 +222,10 @@ impl DiagramElementRegistry {
                                 // taken out of the promise, so it should always be
                                 // available after being awaited.
                                 let querier = querier.await.available().unwrap()?;
+                                if wait_choice.always() {
+                                    wait_for_matching(&querier).await?;
+                                }
+
                                 let replies = querier
                                     .get()
                                     .parameters(parameters.as_ref().clone())
@@ -200,21 +234,31 @@ impl DiagramElementRegistry {
                                     .await
                                     .map_err(ArcError::new)?;
 
-                                while let Ok(reply) = replies.recv_async().await {
-                                    let next_sample = match reply.result() {
-                                        Ok(sample) => sample,
-                                        Err(err) => {
-                                            input.streams.out_error.send(format!("{err}"));
-                                            continue;
-                                        }
-                                    };
+                                loop {
+                                    match replies.recv_async().await {
+                                        Ok(reply) => {
+                                            let next_sample = match reply.result() {
+                                                Ok(sample) => sample,
+                                                Err(err) => {
+                                                    input.streams.out_error.send(format!("{err}"));
+                                                    continue;
+                                                }
+                                            };
 
-                                    match decoder.decode(next_sample) {
-                                        Ok(msg) => {
-                                            input.streams.out.send(msg);
+                                            match decoder.decode(next_sample) {
+                                                Ok(msg) => {
+                                                    println!(" received ===> {msg}");
+                                                    input.streams.out.send(msg);
+                                                }
+                                                Err(msg) => {
+                                                    println!(" --!! {msg}");
+                                                    input.streams.out_error.send(msg);
+                                                }
+                                            }
                                         }
-                                        Err(msg) => {
-                                            input.streams.out_error.send(msg);
+                                        Err(err) => {
+                                            println!(" --!! Error while receiving reply: {err}");
+                                            break;
                                         }
                                     }
                                 }
@@ -230,5 +274,20 @@ impl DiagramElementRegistry {
             },
         )
         .with_fork_result();
+    }
+}
+
+async fn wait_for_matching(querier: &Querier<'_>) -> Result<(), ZenohQuerierError> {
+    let listener = querier.matching_listener().await.map_err(ArcError::new)?;
+    loop {
+        let matching = listener
+            .recv_async()
+            .await
+            .map_err(ArcError::new)?
+            .matching();
+
+        if matching {
+            return Ok(());
+        }
     }
 }

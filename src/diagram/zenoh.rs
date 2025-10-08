@@ -297,13 +297,14 @@ impl Codec {
     }
 
     fn decode(&self, sample: &Sample) -> Result<JsonMessage, String> {
+        self.decode_payload(sample.payload())
+    }
+
+    fn decode_payload(&self, payload: &ZBytes) -> Result<JsonMessage, String> {
         match self {
             Codec::Protobuf(descriptor) => {
-                let msg = DynamicMessage::decode(
-                    descriptor.clone(),
-                    sample.payload().to_bytes().as_ref(),
-                )
-                .map_err(|err| decode_error_msg(err, &sample))?;
+                let msg = DynamicMessage::decode(descriptor.clone(), payload.to_bytes().as_ref())
+                    .map_err(error_to_string)?;
 
                 // TODO(@mxgrey): Refactor this to share an implementation with
                 // the decoder in the grpc feature
@@ -315,16 +316,12 @@ impl Codec {
                         .skip_default_fields(false),
                 );
 
-                value.map_err(|err| decode_error_msg(err, &sample))
+                value.map_err(error_to_string)
             }
             Codec::Json => {
-                let payload = sample
-                    .payload()
-                    .try_to_string()
-                    .map_err(|err| decode_error_msg(err, &sample))?;
+                let payload = payload.try_to_string().map_err(error_to_string)?;
 
-                serde_json::from_str::<JsonMessage>(&payload)
-                    .map_err(|err| decode_error_msg(err, &sample))
+                serde_json::from_str::<JsonMessage>(&payload).map_err(error_to_string)
             }
         }
     }
@@ -339,12 +336,8 @@ impl Codec {
     }
 }
 
-fn decode_error_msg<T: Error>(msg: T, sample: &Sample) -> String {
-    format!(
-        "failed to decode sample with encoding [{}]: {}",
-        sample.encoding(),
-        msg,
-    )
+fn error_to_string<T: Display>(msg: T) -> String {
+    format!("{msg}")
 }
 
 impl TryFrom<&'_ ZenohEncodingConfig> for Codec {
@@ -398,8 +391,39 @@ mod tests {
                     }
                 ]),
             ],
-            "json".into(),
+            json!("json"),
         );
+
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+        impl_test_zenoh_pub_sub(
+            vec![
+                json!({
+                    "x": 1.0,
+                    "y": 2.0,
+                    "yaw": 1.0
+                }),
+                json!({
+                    "x": 10.0,
+                    "y": 20.0,
+                    "yaw": -1.0
+                }),
+                json!({
+                    "x": -5.0,
+                    "y": -10.0,
+                    "yaw": -0.5
+                }),
+                json!({
+                    "x": 100.0,
+                    "y": -50.0,
+                    "yaw": 3.0
+                }),
+            ],
+            json!({
+                "protobuf": "example_protos.navigation.NavigationUpdate"
+            }),
+        )
     }
 
     fn impl_test_zenoh_pub_sub(input_messages: Vec<JsonMessage>, codec: JsonMessage) {
@@ -580,5 +604,149 @@ mod tests {
         }
 
         Ok(Ok(()))
+    }
+
+    #[test]
+    fn test_zenoh_querier() {
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+
+        let mut fixture = DiagramTestFixture::new();
+        fixture.registry.enable_zenoh(::zenoh::Config::default());
+        fixture.registry.register_message::<[f64; 2]>();
+
+        const ADD_KEY: &'static str = "test_zenoh_querier_add";
+        const NAV_KEY: &'static str = "test_zenoh_querier_nav";
+        const NAV_GOAL_MSG: &'static str = "example_protos.navigation.NavigationGoal";
+        const NAV_UPDATE_MSG: &'static str = "example_protos.navigation.NavigationUpdate";
+
+        fixture.context.command(|commands| {
+            commands
+                .serve(async {
+                    let session = ::zenoh::open(::zenoh::Config::default()).await.unwrap();
+                    let queryable = session.declare_queryable(ADD_KEY).await.unwrap();
+                    let codec = Codec::Json;
+                    while let Ok(query) = queryable.recv_async().await {
+                        let payload = codec.decode_payload(query.payload().unwrap()).unwrap();
+                        let reply = payload[0].as_f64().unwrap() + payload[1].as_f64().unwrap();
+                        query
+                            .reply(ADD_KEY, codec.encode(&json!(reply)).unwrap())
+                            .await
+                            .unwrap();
+                    }
+                })
+                .detach();
+
+            commands
+                .serve(async {
+                    let session = ::zenoh::open(::zenoh::Config::default()).await.unwrap();
+                    let queryable = session.declare_queryable(NAV_KEY).await.unwrap();
+
+                    let decoder: Codec = (&ZenohEncodingConfig::Protobuf(NAV_GOAL_MSG.into()))
+                        .try_into()
+                        .unwrap();
+
+                    let encoder: Codec = (&ZenohEncodingConfig::Protobuf(NAV_UPDATE_MSG.into()))
+                        .try_into()
+                        .unwrap();
+
+                    let mut x: f32 = 0.0;
+                    let mut y: f32 = 0.0;
+                    while let Ok(query) = queryable.recv_async().await {
+                        println!(" ----------- QUERY RECEIVED ----------------- ");
+                        let payload = decoder.decode_payload(query.payload().unwrap()).unwrap();
+                        let goal_x = payload["x"].as_f64().unwrap() as f32;
+                        let goal_y = payload["y"].as_f64().unwrap() as f32;
+                        loop {
+                            let _ = until_timeout(Duration::from_millis(100), NeverFinish).await;
+                            println!(" - waited 100ms");
+
+                            let delta_x = clamp(goal_x - x, 1.0);
+                            x += delta_x;
+
+                            let delta_y = clamp(goal_y - y, 1.0);
+                            y += delta_y;
+
+                            let msg = json!({
+                                "x": x,
+                                "y": y,
+                                "yaw": 0.0,
+                            });
+                            let reply = encoder.encode(&msg).unwrap();
+
+                            println!(" {msg} ===> sent");
+                            query.reply(NAV_KEY, reply).await.unwrap();
+
+                            if f32::abs(delta_x) < 1e-3 && f32::abs(delta_y) < 1e-3 {
+                                println!("--------- QUERYABLE FINISHED -----------");
+                                break;
+                            }
+                        }
+                    }
+                })
+                .detach();
+        });
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "add",
+            "default_trace": "on",
+            "ops": {
+                "add": {
+                    "type": "node",
+                    "builder": "zenoh_querier",
+                    "config": {
+                        "key": ADD_KEY,
+                        "decoder": "json",
+                        "encoder": "json"
+                    },
+                    "stream_out": {
+                        "out": "to_nav_cmd"
+                    },
+                    "next": { "builtin" : "dispose" }
+                },
+                "to_nav_cmd": {
+                    "type": "transform",
+                    "cel": "{ \"x\": request, \"y\": request }",
+                    "next": "nav"
+                },
+                "nav": {
+                    "type": "node",
+                    "builder": "zenoh_querier",
+                    "config": {
+                        "key": NAV_KEY,
+                        "encoder": { "protobuf": NAV_GOAL_MSG },
+                        "decoder": { "protobuf": NAV_UPDATE_MSG }
+                    },
+                    "stream_out": { "out": "position" },
+                    "next": "nav_done"
+                },
+                "position": { "type": "buffer" },
+                "nav_done": { "type": "buffer" },
+                "finished": {
+                    "type": "join",
+                    "buffers": {
+                        "position": "position",
+                        "done": "nav_done"
+                    },
+                    "next": "just_position"
+                },
+                "just_position": {
+                    "type": "transform",
+                    "cel": "request.position",
+                    "next": { "builtin": "terminate" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result: JsonMessage = fixture
+            .spawn_and_run_with_conditions(&diagram, [2.0, 2.0], Duration::from_secs(2))
+            .unwrap();
+
+        assert_eq!(result["x"].as_f64().unwrap(), 4.0);
+        assert_eq!(result["y"].as_f64().unwrap(), 4.0);
+        assert_eq!(result["yaw"].as_f64().unwrap(), 0.0);
     }
 }

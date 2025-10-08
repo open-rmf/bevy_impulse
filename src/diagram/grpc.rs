@@ -932,14 +932,6 @@ mod tests {
         }
     }
 
-    fn clamp(val: f32, limit: f32) -> f32 {
-        if f32::abs(val) > limit {
-            return f32::signum(val) * limit;
-        }
-
-        val
-    }
-
     type NavigationUpdateSender = UnboundedSender<Result<NavigationUpdate, Status>>;
     type NavigationUpdateReceiver = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
 

@@ -1294,6 +1294,32 @@ mod tests {
 
         assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
+
+    #[test]
+    fn test_fork_result_termination() {
+        let mut fixture = DiagramTestFixture::new();
+        fixture
+            .registry
+            .register_message::<Result<f32, ()>>()
+            .with_fork_result();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork",
+            "ops": {
+                "fork": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": { "builtin": "dispose" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result: f32 = fixture.spawn_and_run(&diagram, Ok::<_, ()>(5_f32)).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 5.0);
+    }
 }
 
 /// Used with `#[serde(default, skip_serializing_if = "is_default")]` for fields
@@ -1326,4 +1352,14 @@ impl Future for NeverFinish {
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Pending
     }
+}
+
+/// Used by some tests in the grpc and zenoh modules
+#[allow(unused)]
+pub(crate) fn clamp(val: f32, limit: f32) -> f32 {
+    if f32::abs(val) > limit {
+        return f32::signum(val) * limit;
+    }
+
+    val
 }
