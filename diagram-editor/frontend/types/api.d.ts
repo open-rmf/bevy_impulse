@@ -356,6 +356,23 @@ export interface BufferSettings {
 }
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
+ * via the `definition` "ConfigExample".
+ */
+export interface ConfigExample {
+  /**
+   * The value of the config
+   */
+  config: {
+    [k: string]: unknown;
+  };
+  /**
+   * A description of what this config is for
+   */
+  description: string;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "Diagram".
  */
 export interface Diagram {
@@ -1114,6 +1131,8 @@ export interface NodeRegistration {
    *  be used here.
    */
   default_display_text: string;
+  description?: string | null;
+  example_configs: ConfigExample[];
   request: string;
   response: string;
   streams: {
@@ -1128,6 +1147,8 @@ export interface NodeRegistration {
 export interface SectionRegistration {
   config_schema: Schema;
   default_display_text: string;
+  description?: string | null;
+  example_configs: ConfigExample[];
   metadata: SectionMetadata;
   [k: string]: unknown;
 }
