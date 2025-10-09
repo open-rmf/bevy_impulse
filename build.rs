@@ -1,5 +1,5 @@
 fn main() -> std::io::Result<()> {
-    #[cfg(feature = "grpc")]
+    #[cfg(any(feature = "grpc", feature = "zenoh"))]
     {
         use std::path::PathBuf;
 
