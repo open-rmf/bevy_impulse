@@ -24,9 +24,15 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
-use std::sync::Arc;
+use std::{
+    future::Future,
+    sync::Arc,
+};
 
-use crate::{OperationError, OperationRoster, Promise, Provider, RequestExt, StreamPack};
+use crate::{
+    OperationError, OperationRoster, Promise, Provider, RequestExt, StreamPack, Sendish,
+    async_execution::TaskHandle,
+};
 
 /// Provides asynchronous access to the [`World`], allowing you to issue queries
 /// or commands and then await the result.

@@ -117,6 +117,7 @@ zenoh = [
 ros2 = [
   "dep:rclrs",
   "dep:futures-lite",
+  "dep:serde",
 ]
 
 # Turn on all capability related features. This differs from --all-features
