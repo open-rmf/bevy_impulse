@@ -16,38 +16,66 @@
 */
 
 use crate::{Builder, Node, StreamPack, AsyncMap, NeverFinish};
-use rclrs::{Node as Ros2Node, IntoPrimitiveOptions, SubscriptionOptions, RclrsError, MessageIDL};
+use rclrs::{
+    Node as Ros2Node, IntoPrimitiveOptions, SubscriptionOptions, PublisherOptions,
+    RclrsError, MessageIDL, ClientOptions, ServiceIDL,
+};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use futures_lite::future::race;
 
 #[derive(StreamPack)]
-pub struct SubscriptionStreams<T: 'static + Send + Sync, Cancel: 'static + Send + Sync> {
+pub struct SubscriptionStreams<T: 'static + Send + Sync, CancelSignal: 'static + Send + Sync> {
     pub out: T,
-    pub canceller: UnboundedSender<Cancel>,
+    pub canceller: UnboundedSender<CancelSignal>,
 }
+
+#[derive(StreamPack)]
+pub struct ServiceClientStreams<CancelSignal: 'static + Send + Sync> {
+    pub canceller: UnboundedSender<CancelSignal>,
+}
+
+pub type ServiceClientNode<T, CancelSignal> = Node<
+    <T as ServiceIDL>::Request,
+    Result<<T as ServiceIDL>::Response, Result<CancelSignal, String>>,
+    ServiceClientStreams<CancelSignal>,
+>;
 
 pub trait BuildRos2 {
-    fn create_ros2_subscription<'o, T: MessageIDL, Cancel>(
-        &mut self,
-        executor: Ros2Node,
-        options: impl Into<SubscriptionOptions<'o>>,
-    ) -> Node<(), Result<Cancel, RclrsError>, SubscriptionStreams<T, Cancel>>
-    where
-        Cancel: 'static + Send + Sync;
-}
-
-impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
-    fn create_ros2_subscription<'o, T: MessageIDL, Cancel>(
+    fn create_ros2_subscription<'o, T: MessageIDL, CancelSignal>(
         &mut self,
         ros2_node: Ros2Node,
         options: impl Into<SubscriptionOptions<'o>>,
-    ) -> Node<(), Result<Cancel, RclrsError>, SubscriptionStreams<T, Cancel>>
+    ) -> Node<(), Result<CancelSignal, String>, SubscriptionStreams<T, CancelSignal>>
     where
-        Cancel: 'static + Send + Sync
+        CancelSignal: 'static + Send + Sync;
+
+    fn create_ros2_publisher<'o, T: MessageIDL>(
+        &mut self,
+        ros2_node: Ros2Node,
+        options: impl Into<PublisherOptions<'o>>,
+    ) -> Result<Node<T, Result<(), String>>, RclrsError>;
+
+    fn create_ros2_client<'o, T: ServiceIDL, CancelSignal>(
+        &mut self,
+        ros2_node: Ros2Node,
+        options: impl Into<ClientOptions<'o>>,
+    ) -> Result<ServiceClientNode<T, CancelSignal>, RclrsError>
+    where
+        CancelSignal: 'static + Send + Sync;
+}
+
+impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
+    fn create_ros2_subscription<'o, T: MessageIDL, CancelSignal>(
+        &mut self,
+        ros2_node: Ros2Node,
+        options: impl Into<SubscriptionOptions<'o>>,
+    ) -> Node<(), Result<CancelSignal, String>, SubscriptionStreams<T, CancelSignal>>
+    where
+        CancelSignal: 'static + Send + Sync
     {
         let SubscriptionOptions { topic, qos, .. } = options.into();
         let topic = topic.to_owned();
-        self.create_map(move |input: AsyncMap<(), SubscriptionStreams<T, Cancel>>| {
+        self.create_map(move |input: AsyncMap<(), SubscriptionStreams<T, CancelSignal>>| {
             let topic = topic.clone();
             let qos = qos.clone();
             let ros2_node = ros2_node.clone();
@@ -57,7 +85,8 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
             let subscribing = async move {
                 let mut receiver = ros2_node.create_subscription_receiver::<T>(
                     (&topic).qos(qos)
-                )?;
+                )
+                .map_err(|err| err.to_string())?;
 
                 while let Some(msg) = receiver.recv().await {
                     input.streams.out.send(msg);
@@ -83,5 +112,65 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
 
             race(subscribing, cancellation)
         })
+    }
+
+    fn create_ros2_publisher<'o, T: MessageIDL>(
+        &mut self,
+        ros2_node: Ros2Node,
+        options: impl Into<PublisherOptions<'o>>,
+    ) -> Result<Node<T, Result<(), String>>, RclrsError> {
+        let publisher = ros2_node.create_publisher(options)?;
+        let node = self.create_map_block(move |message: T| {
+            publisher
+                .publish(message)
+                .map_err(|err| err.to_string())
+        });
+        Ok(node)
+    }
+
+    fn create_ros2_client<'o, T: ServiceIDL, CancelSignal>(
+        &mut self,
+        ros2_node: Ros2Node,
+        options: impl Into<ClientOptions<'o>>,
+    ) -> Result<ServiceClientNode<T, CancelSignal>, RclrsError>
+    where
+        CancelSignal: 'static + Send + Sync,
+    {
+        let client = ros2_node.create_client::<T>(options)?;
+        let node = self.create_map(move |input: AsyncMap<T::Request, ServiceClientStreams<CancelSignal>>| {
+            let AsyncMap { request, streams, .. } = input;
+            let receiver = client.call(request);
+            let (cancel_sender, mut cancel_receiver) = unbounded_channel();
+            streams.canceller.send(cancel_sender);
+
+            let receive = async move {
+                let response: Result<T::Response, _> = match receiver {
+                    Ok(receiver) => receiver.await,
+                    Err(err) => return Err(Err(err.to_string())),
+                };
+
+                let Ok(response) = response else {
+                    return Err(Err(String::from("response was cancelled by the executor")));
+                };
+
+                Ok(response)
+            };
+
+            let cancellation = async move {
+                let Some(msg) = cancel_receiver.recv().await else {
+                    // The canceller was dropped, meaning the user will never
+                    // cancel this node, so it should just keep running forever
+                    // (it will be forcibly stopped during the workflow cleanup)
+                    NeverFinish.await;
+                    unreachable!("this future will never finish");
+                };
+
+                Err(Ok(msg))
+            };
+
+            race(receive, cancellation)
+        });
+
+        Ok(node)
     }
 }
