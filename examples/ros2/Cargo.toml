@@ -26,7 +26,7 @@ tokio = { version = "1.39", features = ["sync"] }
 clap = { version = "*", features = ["derive"] }
 rand = "*"
 
-rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "worker", features = ["serde"] }
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde"] }
 nav_msgs = { version = "*", features = ["serde"] }
 geometry_msgs = { version = "*", features = ["serde"] }
 std_msgs = { version = "*", features = ["serde"] }

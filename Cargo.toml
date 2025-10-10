@@ -72,7 +72,7 @@ zenoh-ext = { version = "*", features = ["unstable"], optional = true }
 # --- end zenoh
 
 # --- Dependencies for ros2 feature
-rclrs = { git = "https://github.com/ros2-rust/ros2_rust", branch = "main", optional = true }
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde"], optional = true }
 # --- end ros2
 
 tracing = "0.1.41"
@@ -116,6 +116,7 @@ zenoh = [
 
 ros2 = [
   "dep:rclrs",
+  "dep:futures-lite",
 ]
 
 # Turn on all capability related features. This differs from --all-features

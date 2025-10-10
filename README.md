@@ -27,6 +27,12 @@ pip install git+https://github.com/colcon/colcon-cargo.git --break-system-packag
 pip install git+https://github.com/colcon/colcon-ros-cargo.git --break-system-packages
 ```
 
+For now we need a fork of `cargo-ament-build` until [this PR](https://github.com/ros2-rust/cargo-ament-build/pull/26) is merged and released:
+
+```bash
+cargo install --git https://github.com/mxgrey/cargo-ament-build
+```
+
 Create a workspace with the necessary repos:
 
 ```bash
@@ -48,7 +54,7 @@ source /opt/ros/jazzy/setup.bash
 ```
 
 ```bash
-colcon build
+colcon build --allow-overriding action_msgs builtin_interfaces common_interfaces composition_interfaces example_interfaces geometry_msgs lifecycle_msgs nav_msgs rcl_interfaces rosgraph_msgs rosidl_default_generators rosidl_default_runtime sensor_msgs sensor_msgs_py service_msgs statistics_msgs std_msgs std_srvs trajectory_msgs type_description_interfaces unique_identifier_msgs visualization_msgs
 ```
 
 4. After `colcon build` has finished, you should see a `.cargo/config.toml` file inside your workspace, with `[patch.crates-io.___]` sections pointing to the generated message bindings. Now you should source the workspace using

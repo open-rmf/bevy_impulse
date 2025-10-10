@@ -16,7 +16,7 @@
 */
 
 use super::*;
-use crate::prelude::*;
+use crate::{prelude::*, utils::*};
 
 use ::zenoh::{
     bytes::{Encoding, ZBytes},

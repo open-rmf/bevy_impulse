@@ -4,17 +4,20 @@
    schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>bevy_impulse</name>
-  <version>0.0.1</version>
-  <description>Examples of making a bevy_impulse workflow with ROS nodes.</description>
+  <version>0.0.2</version>
+  <description>General-purpose workflow execution</description>
   <maintainer email="mxgrey@intrinsic.ai">Michael X. Grey</maintainer>
   <license>Apache License 2.0</license>
   <author email="mxgrey@intrinsic.ai">Michael X. Grey</author>
 
-  <!-- These dependencies are only needed for the ROS 2 examples -->
-  <test_depend>rcl</test_depend>
-  <test_depend>rosidl_runtime_rs</test_depend>
-  <test_depend>builtin_interfaces</test_depend>
+  <depend>rclrs</depend>
+  <depend>rosidl_runtime_rs</depend>
+  <depend>builtin_interfaces</depend>
+
+  <!-- Used by example code -->
+  <test_depend>geometry_msgs</test_depend>
   <test_depend>nav_msgs</test_depend>
+  <test_depend>std_msgs</test_depend>
 
   <export>
     <build_type>ament_cargo</build_type>

@@ -224,7 +224,7 @@ define_label!(
     DELIVERY_LABEL_INTERNER
 );
 
-pub mod utils {
+pub mod service_utils {
     /// Used by the procedural macro for DeliveryLabel
     pub use bevy_utils::label::DynEq;
 }
