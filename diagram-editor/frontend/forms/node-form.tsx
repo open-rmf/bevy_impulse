@@ -1,5 +1,13 @@
-import { Autocomplete, TextField } from '@mui/material';
+import {
+  Autocomplete,
+  Box,
+  ListItem,
+  Stack,
+  TextField,
+  Tooltip,
+} from '@mui/material';
 import { useMemo, useState } from 'react';
+import { MaterialSymbol } from '../nodes';
 import { useRegistry } from '../registry-provider';
 import BaseEditOperationForm, {
   type BaseEditOperationFormProps,
@@ -60,6 +68,25 @@ function NodeForm(props: NodeFormProps) {
         renderInput={(params) => (
           <TextField {...params} required label="Builder" />
         )}
+        renderOption={({ key, ...otherProps }, value) => {
+          const nodeMetadata = registry.nodes[value];
+          return (
+            <ListItem key={key} {...otherProps}>
+              <Stack
+                direction="row"
+                justifyContent="space-between"
+                width="100%"
+              >
+                <span>{value}</span>
+                {nodeMetadata?.description && (
+                  <Tooltip title={nodeMetadata.description}>
+                    <MaterialSymbol symbol="info" />
+                  </Tooltip>
+                )}
+              </Stack>
+            </ListItem>
+          );
+        }}
       />
       <TextField
         multiline

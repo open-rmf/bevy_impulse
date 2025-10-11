@@ -8,14 +8,16 @@
       "type": "node",
       "builder": "mul",
       "next": "a00aa305-9763-4602-b638-6cb190e6c452",
-      "config": 10
+      "config": 100,
+      "display_text": "x100"
     },
     "fee7f385-2a74-4a87-b8a7-87b8bd03fdf8": {
       "type": "node",
       "builder": "add",
       "next": {
         "builtin": "terminate"
-      }
+      },
+      "display_text": "sum"
     },
     "31fb7423-5300-447a-b259-49c5c79654e7": {
       "type": "join",
@@ -29,7 +31,8 @@
       "type": "node",
       "builder": "mul",
       "next": "305f46be-cf0d-42ac-bd28-26d63746abc3",
-      "config": 100
+      "config": 10,
+      "display_text": "x10"
     },
     "74764679-1f94-49f3-8080-259e57f78be9": {
       "type": "split",

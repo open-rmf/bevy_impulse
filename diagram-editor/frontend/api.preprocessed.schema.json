@@ -114,6 +114,22 @@
         }
       ]
     },
+    "ConfigExample": {
+      "properties": {
+        "config": {
+          "description": "The value of the config"
+        },
+        "description": {
+          "description": "A description of what this config is for",
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "config"
+      ],
+      "type": "object"
+    },
     "DebugSessionMessage": {
       "oneOf": [
         {
@@ -780,6 +796,18 @@
           "description": "If the user does not specify a default display text, the node ID will\n be used here.",
           "type": "string"
         },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "example_configs": {
+          "items": {
+            "$ref": "#/$defs/ConfigExample"
+          },
+          "type": "array"
+        },
         "request": {
           "type": "string"
         },
@@ -798,7 +826,8 @@
         "request",
         "response",
         "streams",
-        "config_schema"
+        "config_schema",
+        "example_configs"
       ],
       "type": "object"
     },
@@ -1027,6 +1056,18 @@
         "default_display_text": {
           "type": "string"
         },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "example_configs": {
+          "items": {
+            "$ref": "#/$defs/ConfigExample"
+          },
+          "type": "array"
+        },
         "metadata": {
           "$ref": "#/$defs/SectionMetadata"
         }
@@ -1034,7 +1075,8 @@
       "required": [
         "default_display_text",
         "metadata",
-        "config_schema"
+        "config_schema",
+        "example_configs"
       ],
       "type": "object"
     },

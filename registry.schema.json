@@ -37,6 +37,22 @@
     "schemas"
   ],
   "$defs": {
+    "ConfigExample": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "A description of what this config is for",
+          "type": "string"
+        },
+        "config": {
+          "description": "The value of the config"
+        }
+      },
+      "required": [
+        "description",
+        "config"
+      ]
+    },
     "MessageOperation": {
       "type": "object",
       "properties": {
@@ -115,12 +131,24 @@
     "NodeRegistration": {
       "type": "object",
       "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "config_schema": {
           "$ref": "#/$defs/Schema"
         },
         "default_display_text": {
           "description": "If the user does not specify a default display text, the node ID will\n be used here.",
           "type": "string"
+        },
+        "example_configs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConfigExample"
+          }
         },
         "request": {
           "type": "string"
@@ -140,7 +168,8 @@
         "request",
         "response",
         "streams",
-        "config_schema"
+        "config_schema",
+        "example_configs"
       ]
     },
     "Schema": {
@@ -213,11 +242,23 @@
     "SectionRegistration": {
       "type": "object",
       "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "config_schema": {
           "$ref": "#/$defs/Schema"
         },
         "default_display_text": {
           "type": "string"
+        },
+        "example_configs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConfigExample"
+          }
         },
         "metadata": {
           "$ref": "#/$defs/SectionMetadata"
@@ -226,7 +267,8 @@
       "required": [
         "default_display_text",
         "metadata",
-        "config_schema"
+        "config_schema",
+        "example_configs"
       ]
     }
   }

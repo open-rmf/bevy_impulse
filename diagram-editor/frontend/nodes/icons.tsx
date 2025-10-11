@@ -9,10 +9,15 @@ export interface MaterialSymbolProps extends BoxProps {
 
 export function MaterialSymbol({
   symbol,
+  className,
   ...otherProps
 }: MaterialSymbolProps): React.JSX.Element {
   return (
-    <Box component="span" className="material-symbols-outlined" {...otherProps}>
+    <Box
+      component="span"
+      className={`material-symbols-outlined ${className}`}
+      {...otherProps}
+    >
       {symbol}
     </Box>
   );
