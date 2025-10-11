@@ -4,8 +4,8 @@ edition = "2021"
 version = "0.0.1"
 
 [[bin]]
-name = "nav-example"
-path = "src/nav_example.rs"
+name = "nav-executor"
+path = "src/nav_executor.rs"
 
 [[bin]]
 name = "fake-plan-generator"
@@ -16,17 +16,22 @@ name = "goal-requester"
 path = "src/goal_requester.rs"
 
 [dependencies]
+axum = "0.8.4"
 bevy_app = "0.12"
 bevy_core = "0.12"
 bevy_impulse = { path = "../..", features = ["diagram", "ros2"] }
+bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../diagram-editor" }
 serde = { workspace = true }
 schemars = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "*", features = ["derive"] }
 rand = "*"
+tracing-subscriber = "0.3.19"
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 
 rclrs = { workspace = true }
 nav_msgs = { version = "*", features = ["serde", "schemars"] }
 geometry_msgs = { version = "*", features = ["serde", "schemars"] }
 std_msgs = { version = "*", features = ["serde", "schemars"] }
 builtin_interfaces = { version = "*", features = ["serde", "schemars"] }
+example_interfaces = { version = "*", features = ["serde", "schemars"] }

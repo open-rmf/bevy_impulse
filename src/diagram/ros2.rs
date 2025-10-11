@@ -54,13 +54,13 @@ impl<'a> Ros2Registry<'a> {
     /// subscriptions for this message type.
     pub fn register_ros2_message<T: MessageIDL + Serialize + DeserializeOwned + JsonSchema>(&mut self) -> &'_ mut Self {
         let node_name_snake = self.ros2_node.name().replace("/", "_");
-        let message_name = T::TYPE_NAME;
-        let message_name_snake = message_name.replace("/", "_");
+        let message_name_minimal = T::TYPE_NAME.split("/").last().unwrap_or("<unnamed>");
+        let message_name_snake = T::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder(
             NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__subscription"))
-            .with_default_display_text(format!("{message_name} Subscription")),
+            .with_default_display_text(format!("{message_name_minimal} Subscription")),
             move |builder, config: PrimitiveOptions| {
                 builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), config)
             }
@@ -77,7 +77,7 @@ impl<'a> Ros2Registry<'a> {
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
             NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__publisher"))
-            .with_default_display_text(format!("{message_name} Publisher", )),
+            .with_default_display_text(format!("{message_name_minimal} Publisher", )),
             move |builder, config: PrimitiveOptions| {
                 let node = builder.create_ros2_publisher::<T>(ros2_node.clone(), config)?;
                 Ok(node)
@@ -96,13 +96,13 @@ impl<'a> Ros2Registry<'a> {
         S::Response: Serialize + DeserializeOwned + JsonSchema,
     {
         let node_name_snake = self.ros2_node.name().replace("/", "_");
-        let service_name = S::TYPE_NAME;
-        let service_name_snake = service_name.replace("/", "_");
+        let service_name_minimal = S::TYPE_NAME.split("/").last().unwrap_or("<unnamed>");
+        let service_name_snake = S::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
             NodeBuilderOptions::new(format!("{node_name_snake}__{service_name_snake}__client"))
-            .with_default_display_text(format!("{service_name} Client")),
+            .with_default_display_text(format!("{service_name_minimal} Client")),
             move |builder, config: PrimitiveOptions| {
                 let node = builder.create_ros2_service_client::<S, JsonMessage>(ros2_node.clone(), config)?;
                 Ok(node)
@@ -133,13 +133,13 @@ impl<'a> Ros2Registry<'a> {
         A::Feedback: Serialize + DeserializeOwned + JsonSchema,
     {
         let node_name_snake = self.ros2_node.name().replace("/", "_");
-        let action_name = A::TYPE_NAME;
-        let action_name_snake = action_name.replace("/", "_");
+        let action_name_minimal = A::TYPE_NAME.split("/").last().unwrap_or("<unnamed>");
+        let action_name_snake = A::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
             NodeBuilderOptions::new(format!("{node_name_snake}__{action_name_snake}__client"))
-            .with_default_display_text(format!("{action_name} Client")),
+            .with_default_display_text(format!("{action_name_minimal} Client")),
             move |builder, config: ActionClientConfig| {
                 let node = builder.create_ros2_action_client::<A, JsonMessage>(ros2_node.clone(), &config)?;
                 Ok(node)

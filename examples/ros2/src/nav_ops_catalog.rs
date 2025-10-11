@@ -27,6 +27,8 @@ use nav_msgs::{
     srv::{GetPlan, GetPlan_Request, GetPlan_Response},
 };
 
+use example_interfaces::action::Fibonacci;
+
 use std_msgs::msg::Empty as EmptyMsg;
 
 pub fn register_nav_catalog(
@@ -38,7 +40,8 @@ pub fn register_nav_catalog(
         .register_ros2_message::<Goals>()
         .register_ros2_message::<EmptyMsg>()
         .register_ros2_message::<Path>()
-        .register_ros2_service::<GetPlan>();
+        .register_ros2_service::<GetPlan>()
+        .register_ros2_action::<Fibonacci>();
 
     // Create a client that fetches plans from a server. Each pair of
     // consecutive goals is planned for independently, in parallel.

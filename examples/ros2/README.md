@@ -2,7 +2,7 @@
 
 The examples in this directory showcase how to incorporate ROS primitives into a workflow. We model a small portion of a navigation workflow that involves receiving goals, fetching paths to connect those goals from a planning service, and then queuing up the paths for execution.
 
-This diagram represents the workflow implemented by `src/nav_example.rs`:
+This diagram represents the workflow implemented by [`diagrams/default-nav-system.json`](diagrams/default-nav-system.json):
 
 ![nav-example-workflow](assets/figures/nav-example.png)
 
@@ -17,7 +17,7 @@ source install/setup.bash # run in the root of your colcon workspace
 2. Then you can go into this `examples/ros2` directory and run the example with
 
 ```bash
-cargo run --bin nav-example # run in this directory
+cargo run --bin nav-executor -- run # run in this directory
 ```
 
 3. The `nav-example` workflow will wait until it receives some goals to process. You can send it some randomized goals by **opening a new terminal** in the same directory and running
@@ -46,3 +46,25 @@ Paths currently waiting to run:
 ```
 
 which indicates that the buffer has been successfully cleared out.
+
+5. You can view and edit the navigation workflow by running the web-based editor:
+
+```bash
+cargo run --bin nav-executor -- serve # run in this directory
+```
+
+Open up a web browser (chrome works best) and go to [http://localhost:3000](http://localhost:3000). Use the upload button to load the default nav workflow from [`diagrams/default-nav-system.json`](diagrams/default-nav-system.json). After you've edited it, you can run it immediately using the play button (enter `null` into the input box that pops up). Or you can use the export button to download and save your changes.
+
+6. The diagram editor does not currently have a button for cancelling a workflow. To stop a workflow that is currently running, use
+
+```bash
+ros2 topic pub end_workflow std_msgs/Empty
+```
+
+The default workflow will listen to the `/end_workflow` topic for any message, and then exit as soon as one is received. After you have triggerd the workflow to end, you should this message in the response:
+
+```
+"workflow ended by /end_workflow request"
+```
+
+7. To see how to register custom diagram operations and any ROS messages, services, or actions that you need, take a look at [`src/nav_ops_catalog.rs`](src/nav_ops_catalog.rs).
