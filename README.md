@@ -4,6 +4,10 @@
 [![ci_web](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_web.yaml/badge.svg)](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_web.yaml)
 [![Crates.io Version](https://img.shields.io/crates/v/bevy_impulse)](https://crates.io/crates/bevy_impulse)
 
+> [!IMPORTANT]
+> For the ROS 2 integration feature, check out the [`ros2` branch](https://github.com/open-rmf/bevy_impulse/tree/ros2).
+>
+> That feature is kept separate for now because it requires additional non-Rust setup. It will be merged into `main` after dynamic message introspection is finished.
 
 # Reactive Programming for Bevy
 
