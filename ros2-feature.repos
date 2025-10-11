@@ -30,8 +30,8 @@ repositories:
   ros2-rust/rosidl_rust:
     type: git
     url: https://github.com/mxgrey/rosidl_rust.git
-    version: fix_actions
+    version: crossflow
   ros2-rust/rosidl_runtime_rs:
     type: git
     url: https://github.com/mxgrey/rosidl_runtime_rs.git
-    version: fix_actions
+    version: crossflow

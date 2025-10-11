@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Open Source Robotics Foundation
+ * Copyright (C) 2025 Open Source Robotics Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,12 @@ use rclrs::{
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use futures_lite::future::race;
 use futures::{StreamExt, future::{select, Either}};
-use serde::{Serialize, Deserialize};
-use std::pin::pin;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use std::{
+    pin::pin,
+    sync::Arc,
+};
+use schemars::JsonSchema;
 
 #[derive(StreamPack)]
 pub struct SubscriptionStreams<T: 'static + Send + Sync, CancelSignal: 'static + Send + Sync> {
@@ -54,16 +58,16 @@ pub struct ActionClientStreams<A: ActionIDL, CancelSignal: 'static + Send + Sync
 
 pub type ActionClientNode<A, CancelSignal> = Node<
     <A as ActionIDL>::Goal,
-    Result<ActionResult<A>, Result<CancelSignal, String>>,
+    Result<ActionResult<<A as ActionIDL>::Result>, Result<CancelSignal, String>>,
     ActionClientStreams<A, CancelSignal>,
 >;
 
 /// This is the final result returned by a ROS 2 action if it ended under normal
 /// circumstances.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionResult<A: ActionIDL> {
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ActionResult<R> {
     pub status: GoalStatusCode,
-    pub result: A::Result,
+    pub result: R,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,7 +105,8 @@ pub trait BuildRos2 {
         options: impl Into<ActionClientOptions<'o>>,
     ) -> Result<ActionClientNode<A, CancelSignal>, RclrsError>
     where
-        CancelSignal: 'static + Send + Sync;
+        CancelSignal: 'static + Send + Sync,
+        A::Result: Serialize + DeserializeOwned + JsonSchema;
 }
 
 impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
@@ -179,11 +184,16 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         let client = ros2_node.create_client::<S>(options)?;
         let node = self.create_map(move |input: AsyncMap<S::Request, ServiceClientStreams<CancelSignal>>| {
             let AsyncMap { request, streams, .. } = input;
-            let receiver = client.call(request);
+            let client = Arc::clone(&client);
             let (cancel_sender, mut cancel_receiver) = unbounded_channel();
             streams.canceller.send(cancel_sender);
 
             let receive = async move {
+                client.notify_on_service_ready()
+                    .await
+                    .map_err(|_| Err(String::from("failed to wait for action server")))?;
+
+                let receiver = client.call(request);
                 let response: Result<S::Response, _> = match receiver {
                     Ok(receiver) => receiver.await,
                     Err(err) => return Err(Err(err.to_string())),
@@ -220,16 +230,22 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         options: impl Into<ActionClientOptions<'o>>,
     ) -> Result<ActionClientNode<A, CancelSignal>, RclrsError>
     where
-        CancelSignal: 'static + Send + Sync
+        CancelSignal: 'static + Send + Sync,
+        A::Result: Serialize + DeserializeOwned + JsonSchema,
     {
         let client = ros2_node.create_action_client::<A>(options)?;
         let node = self.create_map(move |input: AsyncMap<A::Goal, ActionClientStreams<A, CancelSignal>>| {
             let AsyncMap { request, streams, .. } = input;
-            let goal_requested = client.request_goal(request);
+            let client = Arc::clone(&client);
             let (cancel_sender, mut cancel_receiver) = unbounded_channel();
             streams.canceller.send(cancel_sender);
 
             async move {
+                client.notify_on_action_ready()
+                    .await
+                    .map_err(|_| Err(String::from("failed to wait for action server")))?;
+
+                let goal_requested = client.request_goal(request);
                 let Some(goal_client) = goal_requested.await else {
                     return Err(Err(String::from("goal was rejected")));
                 };
@@ -260,7 +276,7 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
                         let Some(signal) = cancel_receiver.recv().await else {
                             // The canceller was dropped, meaning the user will never
                             // cancel this node, so it should just keep running forever
-                            // (it will be forcibly stopped during the workflow cleanup)
+                            // (it will be forcibly stopped during the node cleanup)
                             NeverFinish.await;
                             unreachable!("this future will never finish");
                         };

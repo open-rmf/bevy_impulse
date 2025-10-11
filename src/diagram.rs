@@ -38,6 +38,11 @@ mod grpc;
 #[cfg(feature = "zenoh")]
 mod zenoh;
 
+#[cfg(feature = "ros2")]
+mod ros2;
+#[cfg(feature = "ros2")]
+pub use ros2::*;
+
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
