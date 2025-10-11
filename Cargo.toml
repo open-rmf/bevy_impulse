@@ -16,17 +16,24 @@ categories = [
 ]
 
 [workspace.dependencies]
-schemars = { version = "0.9.0" }
-serde = { version = "1.0.210", features = ["derive", "rc"] }
-serde_json = { version = "1.0.128" }
-
-[dependencies]
-bevy_impulse_derive = { path = "macros", version = "0.0.2" }
 bevy_ecs = "0.12"
 bevy_utils = "0.12"
 bevy_hierarchy = "0.12"
 bevy_derive = "0.12"
 bevy_app = "0.12"
+schemars = { version = "0.9.0" }
+serde = { version = "1.0.210", features = ["derive", "rc"] }
+serde_json = { version = "1.0.128" }
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde", "schemars"] }
+tokio = { version = "1.39" }
+
+[dependencies]
+bevy_impulse_derive = { path = "macros", version = "0.0.2" }
+bevy_ecs = { workspace = true }
+bevy_utils = { workspace = true }
+bevy_hierarchy = { workspace = true }
+bevy_derive = { workspace = true }
+bevy_app = { workspace = true }
 
 async-task = { version = "4.7.1", optional = true }
 
@@ -37,7 +44,7 @@ bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
 
 itertools = "0.13"
 smallvec = { version = "1.13", features = ["serde"] }
-tokio = { version = "1.39", features = ["sync"] }
+tokio = { workspace = true, features = ["sync"] }
 futures = "0.3"
 backtrace = "0.3"
 anyhow = "1.0"
@@ -72,7 +79,7 @@ zenoh-ext = { version = "*", features = ["unstable"], optional = true }
 # --- end zenoh
 
 # --- Dependencies for ros2 feature
-rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde", "schemars"], optional = true }
+rclrs = { workspace = true, optional = true }
 # --- end ros2
 
 tracing = "0.1.41"
@@ -157,3 +164,6 @@ doc = false
 
 [build-dependencies]
 tonic-prost-build = { version = "0.14", optional = true }
+
+[patch.crates-io]
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow" }

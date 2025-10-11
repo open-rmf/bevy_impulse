@@ -18,10 +18,12 @@
 use super::*;
 use crate::BuildRos2;
 use rclrs::{
-    Node as Ros2Node, MessageIDL, ServiceIDL, ActionIDL, QoSProfile, ActionClientOptions,
-    SubscriptionOptions, PublisherOptions, ClientOptions, PrimitiveOptions, IntoPrimitiveOptions,
+    Node as Ros2Node, MessageIDL, ServiceIDL, ActionIDL, ActionClientOptions,
+    PrimitiveOptions, QosOptions,
+    GoalStatus, GoalStatusCode,
 };
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc::UnboundedSender;
 
 impl DiagramElementRegistry {
     /// Use this to register workflow node builders that will produce subscriptions,
@@ -50,101 +52,118 @@ pub struct Ros2Registry<'a> {
 impl<'a> Ros2Registry<'a> {
     /// Register a message definition to obtain node builders for publishers and
     /// subscriptions for this message type.
-    pub fn register_ros2_message<T: MessageIDL + Serialize + DeserializeOwned + JsonSchema>(&mut self) {
-        let node_name = self.ros2_node.name();
+    pub fn register_ros2_message<T: MessageIDL + Serialize + DeserializeOwned + JsonSchema>(&mut self) -> &'_ mut Self {
+        let node_name_snake = self.ros2_node.name().replace("/", "_");
         let message_name = T::TYPE_NAME;
+        let message_name_snake = message_name.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder(
-            NodeBuilderOptions::new(format!("{node_name}_{message_name}_subscription"))
+            NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__subscription"))
             .with_default_display_text(format!("{message_name} Subscription")),
-            move |builder, config: TopicConfig| {
-                builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), &config)
+            move |builder, config: PrimitiveOptions| {
+                builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), config)
             }
-        );
+        )
+            .with_fork_result();
+
+        // For cancel sender
+        self.registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_message::<UnboundedSender<JsonMessage>>();
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name}_{message_name}_publisher"))
+            NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__publisher"))
             .with_default_display_text(format!("{message_name} Publisher", )),
-            move |builder, config: TopicConfig| {
-                let node = builder.create_ros2_publisher::<T>(ros2_node.clone(), &config)?;
+            move |builder, config: PrimitiveOptions| {
+                let node = builder.create_ros2_publisher::<T>(ros2_node.clone(), config)?;
                 Ok(node)
             }
-        );
+        )
+            .with_fork_result();
+
+        self
     }
 
     /// Register a service definition to obtain a node builder for a service
     /// client that can use this service definition.
-    pub fn register_ros2_service<S: ServiceIDL>(&mut self)
+    pub fn register_ros2_service<S: ServiceIDL>(&mut self) -> &'_ mut Self
     where
         S::Request: Serialize + DeserializeOwned + JsonSchema,
         S::Response: Serialize + DeserializeOwned + JsonSchema,
     {
-        let node_name = self.ros2_node.name();
+        let node_name_snake = self.ros2_node.name().replace("/", "_");
         let service_name = S::TYPE_NAME;
+        let service_name_snake = service_name.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name}_{service_name}_client"))
+            NodeBuilderOptions::new(format!("{node_name_snake}__{service_name_snake}__client"))
             .with_default_display_text(format!("{service_name} Client")),
-            move |builder, config: TopicConfig| {
-                let node = builder.create_ros2_service_client::<S, JsonMessage>(ros2_node.clone(), &config)?;
+            move |builder, config: PrimitiveOptions| {
+                let node = builder.create_ros2_service_client::<S, JsonMessage>(ros2_node.clone(), config)?;
                 Ok(node)
             }
-        );
+        )
+            .with_fork_result();
+
+        self.registry
+            .register_message::<Result<JsonMessage, String>>()
+            .with_fork_result();
+
+        // For cancel sender
+        self.registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_message::<UnboundedSender<JsonMessage>>();
+
+        self
     }
 
     /// Register an action definition to obtain a node builder for an action
     /// client that can use this action definition.
-    pub fn register_ros2_action<A: ActionIDL>(&mut self)
+    pub fn register_ros2_action<A: ActionIDL>(&mut self) -> &'_ mut Self
     where
         A::Goal: Serialize + DeserializeOwned + JsonSchema,
         A::Result: Serialize + DeserializeOwned + JsonSchema,
         A::Feedback: Serialize + DeserializeOwned + JsonSchema,
     {
-        let node_name = self.ros2_node.name();
+        let node_name_snake = self.ros2_node.name().replace("/", "_");
         let action_name = A::TYPE_NAME;
+        let action_name_snake = action_name.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
         self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name}_{action_name}_client"))
+            NodeBuilderOptions::new(format!("{node_name_snake}__{action_name_snake}__client"))
             .with_default_display_text(format!("{action_name} Client")),
             move |builder, config: ActionClientConfig| {
                 let node = builder.create_ros2_action_client::<A, JsonMessage>(ros2_node.clone(), &config)?;
                 Ok(node)
             }
-        );
-    }
-}
+        )
+            .with_fork_result();
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct TopicConfig {
-    pub topic: Arc<str>,
-    pub qos: QoSProfile,
-}
+        self.registry
+            .register_message::<Result<JsonMessage, String>>()
+            .with_fork_result();
 
-impl<'a> From<&'a TopicConfig> for SubscriptionOptions<'a> {
-    fn from(value: &'a TopicConfig) -> Self {
-        PrimitiveOptions::new(&value.topic)
-            .qos(value.qos.clone())
-            .into()
-    }
-}
+        self.registry.register_message::<A::Feedback>();
+        self.registry.register_message::<GoalStatus>();
+        self.registry.register_message::<GoalStatusCode>();
 
-impl<'a> From<&'a TopicConfig> for PublisherOptions<'a> {
-    fn from(value: &'a TopicConfig) -> Self {
-        PrimitiveOptions::new(&value.topic)
-            .qos(value.qos.clone())
-            .into()
-    }
-}
+        // For cancel sender
+        self.registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_message::<UnboundedSender<JsonMessage>>();
 
-impl<'a> From<&'a TopicConfig> for ClientOptions<'a> {
-    fn from(value: &'a TopicConfig) -> Self {
-        PrimitiveOptions::new(&value.topic)
-            .qos(value.qos.clone())
-            .into()
+
+        self
     }
 }
 
@@ -153,25 +172,25 @@ pub struct ActionClientConfig {
     /// The name of the action that this client will send requests to
     pub action: Arc<str>,
     /// The quality of service profile for the goal service
-    pub goal_service_qos: QoSProfile,
+    pub goal_service_qos: QosOptions,
     /// The quality of service profile for the result service
-    pub result_service_qos: QoSProfile,
+    pub result_service_qos: QosOptions,
     /// The quality of service profile for the cancel service
-    pub cancel_service_qos: QoSProfile,
+    pub cancel_service_qos: QosOptions,
     /// The quality of service profile for the feedback topic
-    pub feedback_topic_qos: QoSProfile,
+    pub feedback_topic_qos: QosOptions,
     /// The quality of service profile for the status topic
-    pub status_topic_qos: QoSProfile,
+    pub status_topic_qos: QosOptions,
 }
 
 impl<'a> From<&'a ActionClientConfig> for ActionClientOptions<'a> {
     fn from(value: &'a ActionClientConfig) -> Self {
         let mut options = ActionClientOptions::new(&value.action);
-        options.goal_service_qos = value.goal_service_qos.clone();
-        options.result_service_qos = value.result_service_qos.clone();
-        options.cancel_service_qos = value.cancel_service_qos.clone();
-        options.feedback_topic_qos = value.feedback_topic_qos.clone();
-        options.status_topic_qos = value.status_topic_qos.clone();
+        value.goal_service_qos.apply_to(&mut options.goal_service_qos);
+        value.result_service_qos.apply_to(&mut options.result_service_qos);
+        value.cancel_service_qos.apply_to(&mut options.cancel_service_qos);
+        value.feedback_topic_qos.apply_to(&mut options.feedback_topic_qos);
+        value.status_topic_qos.apply_to(&mut options.status_topic_qos);
         options
     }
 }

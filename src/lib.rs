@@ -420,11 +420,11 @@ pub mod prelude {
         ImpulseAppPlugin, ImpulsePlugin,
     };
 
-    pub use bevy_ecs::prelude::In;
+    pub use bevy_ecs::prelude::{In, World};
 
     #[cfg(feature = "diagram")]
     pub use crate::{
-        buffer::{JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage},
+        buffer::{JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferView, JsonBufferWorldAccess, JsonMessage},
         diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions, Section},
     };
 

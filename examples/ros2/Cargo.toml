@@ -19,15 +19,14 @@ path = "src/goal_requester.rs"
 bevy_app = "0.12"
 bevy_core = "0.12"
 bevy_impulse = { path = "../..", features = ["diagram", "ros2"] }
-serde = "*"
-schemars = "*"
-serde_json = "*"
-tokio = { version = "1.39", features = ["sync"] }
+serde = { workspace = true }
+schemars = { workspace = true }
+serde_json = { workspace = true }
 clap = { version = "*", features = ["derive"] }
 rand = "*"
 
-rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde"] }
-nav_msgs = { version = "*", features = ["serde"] }
-geometry_msgs = { version = "*", features = ["serde"] }
-std_msgs = { version = "*", features = ["serde"] }
-builtin_interfaces = { version = "*", features = ["serde"] }
+rclrs = { workspace = true }
+nav_msgs = { version = "*", features = ["serde", "schemars"] }
+geometry_msgs = { version = "*", features = ["serde", "schemars"] }
+std_msgs = { version = "*", features = ["serde", "schemars"] }
+builtin_interfaces = { version = "*", features = ["serde", "schemars"] }

@@ -249,6 +249,11 @@ impl<'a> JsonBufferView<'a> {
         self.len() == 0
     }
 
+    /// Iterate through the current elements of the buffer.
+    pub fn iter(&self) -> IterJsonBufferView<'a, '_> {
+        IterJsonBufferView { index: 0, view: self }
+    }
+
     /// Check whether the gate of this buffer is open or closed.
     pub fn gate(&self) -> Gate {
         self.gate
@@ -256,6 +261,20 @@ impl<'a> JsonBufferView<'a> {
             .get(&self.session)
             .copied()
             .unwrap_or(Gate::Open)
+    }
+}
+
+pub struct IterJsonBufferView<'a, 'b> {
+    index: usize,
+    view: &'b JsonBufferView<'a>,
+}
+
+impl<'a, 'b> Iterator for IterJsonBufferView<'a, 'b> {
+    type Item = Result<JsonMessage, serde_json::Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.index;
+        self.index += 1;
+        self.view.get(next).transpose()
     }
 }
 

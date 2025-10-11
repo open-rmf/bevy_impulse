@@ -18,11 +18,10 @@
 use rclrs::{*, Promise};
 use bevy_impulse::prelude::*;
 use serde::{Serialize, Deserialize};
-use schemars::JsonSchema;
-use tokio::sync::mpsc::unbounded_channel;
 use serde_json::json;
 use bevy_app::ScheduleRunnerPlugin;
 use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
+use schemars::JsonSchema;
 
 use std::collections::VecDeque;
 
@@ -42,38 +41,12 @@ fn main() {
     let mut registry = DiagramElementRegistry::new();
     let node = executor.create_node("nav_manager").unwrap();
 
-    // Create a subscriber that listens for goal messages to arrive.
-    registry.register_node_builder(
-        NodeBuilderOptions::new("receive_goals"),
-        {
-            let node = node.clone();
-            move |builder, config: SubscriptionConfig| {
-                let node = node.clone();
-                builder.create_map(move |input: AsyncMap<(), GoalStream>| {
-                    let (sender, mut receiver) = unbounded_channel();
-
-                    let _subscription = node.create_subscription(
-                        config.topic.transient_local(),
-                        move |msg: Goals| {
-                            let _ = sender.send(msg);
-                        }
-                    ).unwrap();
-
-                    let logger = node.logger().clone();
-                    log!(&logger, "Waiting to receive goals from topic {}...", config.topic);
-                    async move {
-                        // Force the _subscription variable to be captured since
-                        // it has side effects.
-                        let _subscription = _subscription;
-                        while let Some(msg) = receiver.recv().await {
-                            log!(&logger, "Received a sequence of {} goals", msg.goals.len());
-                            input.streams.goals.send(msg);
-                        }
-                    }
-                })
-            }
-        }
-    );
+    registry
+        .enable_ros2(node.clone())
+        .register_ros2_message::<Goals>()
+        .register_ros2_message::<EmptyMsg>()
+        .register_ros2_message::<Path>()
+        .register_ros2_service::<GetPlan>();
 
     // Create a client that fetches plans from a server. Each pair of
     // consecutive goals is planned for independently, in parallel.
@@ -81,10 +54,13 @@ fn main() {
     // After issuing every plan request, we will await them in order of first to
     // last and stream them out from the node in that order, regardless of the
     // order in which the plans arrive from the service.
+    //
+    // We make a custom node builder for this instead of using the generic service
+    // client builder because we want the input to be processed in a specific way:
+    // breaking it into multiple parallel requests and reassembling them in order
+    // as they complete. In the future we might introduce generalized "enumerate"
+    // and "collect" operations which could replace this.
     registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
         .register_node_builder(
             NodeBuilderOptions::new("fetch_plans"),
             {
@@ -130,54 +106,36 @@ fn main() {
 
     // We can't really execute the paths in this example program, so let's just
     // print whatever accumulates in the buffer.
-    let print_paths = app.world.spawn_service(print_paths.into_blocking_service());
     registry
         .opt_out()
         .no_serializing()
         .no_deserializing()
         .register_node_builder(
-            NodeBuilderOptions::new("print_paths"),
-            move |builder, _config: ()| {
-                builder.create_node(print_paths)
+            NodeBuilderOptions::new("print_from_buffer"),
+            move |builder, msg: Option<String>| {
+                let callback = move |In(key): In<JsonBufferKey>, world: &World| {
+                    let buffer = world.json_buffer_view(&key).unwrap();
+                    let values: Result<Vec<JsonMessage>, _> = buffer.iter().collect();
+                    let values = values.unwrap();
+                    println!("{}{values:#?}", msg.as_ref().unwrap_or(&String::new()));
+                };
+
+                builder.create_node(callback.into_blocking_callback())
             }
         )
         .with_listen();
 
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_message::<Path>();
-
-    // We'll provide a topic for clearing the goals from the buffer
     registry.register_node_builder(
-        NodeBuilderOptions::new("receive_cancel"),
-        {
-            let node = node.clone();
-            move |builder, config: SubscriptionConfig| {
-                let node = node.clone();
-                builder.create_map(move |input: AsyncMap<(), ClearSignalString>| {
-                    let (sender, mut receiver) = unbounded_channel();
-
-                    let _subscription = node.create_subscription(
-                        config.topic.transient_local(),
-                        move |_msg: EmptyMsg| {
-                            let _ = sender.send(());
-                        }
-                    ).unwrap();
-
-                    let logger = node.logger().clone();
-                    async move {
-                        // Force the _subscription variable to be captured since
-                        // it has side effects.
-                        let _subscription = _subscription;
-                        while let Some(_) = receiver.recv().await {
-                            log!(&logger, "Received a request to clear the goals");
-                            input.streams.clear.send(());
-                        }
-                    }
-                })
-            }
+        NodeBuilderOptions::new("print"),
+        move |builder, PrintConfig { message, include_value }: PrintConfig| {
+            builder.create_map_block(move |value: JsonMessage| {
+                if include_value {
+                    println!("{message}{value:#?}");
+                } else {
+                    println!("{message}");
+                }
+                value
+            })
         }
     );
 
@@ -194,6 +152,7 @@ fn main() {
         )
         .with_buffer_access();
 
+    let request_goal_topic = "request_goal";
     let diagram = Diagram::from_json(json!({
         "version": "0.1.0",
         "start": "setup",
@@ -201,19 +160,33 @@ fn main() {
             "setup": {
                 "type": "fork_clone",
                 "next": [
-                    "receive_goals",
+                    "print_welcome",
                     "receive_cancel"
                 ]
             },
+            "print_welcome": {
+                "type": "node",
+                "builder": "print",
+                "config": {
+                    "message": format!("Waiting to receive goals from {request_goal_topic}"),
+                    "include_value": false
+                },
+                "next": "receive_goals"
+            },
             "receive_goals": {
                 "type": "node",
-                "builder": "receive_goals",
+                "builder": "nav_manager__nav_msgs_msg_Goals__subscription",
                 "config": {
-                    "topic": "request_goal"
+                    "topic": format!("{request_goal_topic}"),
                 },
                 "stream_out": {
-                    "goals": "fetch_plans",
+                    "out": "fetch_plans"
                 },
+                "next": "quit"
+            },
+            "quit": {
+                "type": "transform",
+                "cel": "null",
                 "next": { "builtin": "terminate" }
             },
             "fetch_plans": {
@@ -239,19 +212,25 @@ fn main() {
             },
             "print_paths": {
                 "type": "node",
-                "builder": "print_paths",
+                "builder": "print_from_buffer",
+                "config": "Paths currently waiting to run:\n",
                 "next": { "builtin": "dispose" }
             },
             "receive_cancel": {
                 "type": "node",
-                "builder": "receive_cancel",
+                "builder": "nav_manager__std_msgs_msg_Empty__subscription",
                 "config": {
                     "topic": "cancel_goals"
                 },
                 "stream_out": {
-                    "clear": "access_paths"
+                    "out": "trigger_clear_paths"
                 },
                 "next": { "builtin": "dispose" }
+            },
+            "trigger_clear_paths": {
+                "type": "transform",
+                "cel": "null",
+                "next": "access_paths"
             },
             "access_paths": {
                 "type": "buffer_access",
@@ -283,18 +262,9 @@ fn main() {
         ImpulsePlugin::default(),
     ));
 
+    log!(&*node, "Beginning workflow...");
     std::thread::spawn(move || executor.spin(SpinOptions::default()));
     app.run()
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-struct SubscriptionConfig {
-    topic: String,
-}
-
-#[derive(StreamPack)]
-struct GoalStream {
-    goals: Goals,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -308,20 +278,6 @@ struct PathStream {
     paths: Path,
 }
 
-#[derive(StreamPack)]
-struct ClearSignalString {
-    clear: (),
-}
-
-fn print_paths(
-    In(key): In<BufferKey<Path>>,
-    access: BufferAccess<Path>,
-) {
-    let buffer = access.get(&key).unwrap();
-    let paths: Vec<&Path> = buffer.iter().collect();
-    println!("Paths currently waiting to run:\n{paths:#?}");
-}
-
 fn clear_paths(
     In((_, key)): In<((), BufferKey<Path>)>,
     mut access: BufferAccessMut<Path>,
@@ -329,4 +285,10 @@ fn clear_paths(
     let mut buffer = access.get_mut(&key).unwrap();
     // Remove all goals from the buffer by draining its full range.
     buffer.drain(..);
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct PrintConfig {
+    message: String,
+    include_value: bool,
 }

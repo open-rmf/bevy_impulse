@@ -70,7 +70,7 @@ pub struct ActionResult<R> {
     pub result: R,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ActionCancellation<CancelSignal> {
     pub signal: CancelSignal,
     pub response: CancelResponse,
@@ -119,7 +119,7 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         CancelSignal: 'static + Send + Sync
     {
         let SubscriptionOptions { topic, qos, .. } = options.into();
-        let topic = topic.to_owned();
+        let topic: Arc<str> = topic.into();
         self.create_map(move |input: AsyncMap<(), SubscriptionStreams<T, CancelSignal>>| {
             let topic = topic.clone();
             let qos = qos.clone();
