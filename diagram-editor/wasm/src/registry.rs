@@ -12,6 +12,7 @@ pub fn get_registry() -> JsValue {
         .expect("failed to serialize registry")
 }
 
+#[cfg(target_arch = "wasm32")]
 #[cfg(test)]
 mod tests {
     use wasm_bindgen_test::wasm_bindgen_test;

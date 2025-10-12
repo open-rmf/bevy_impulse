@@ -17,6 +17,7 @@ init_wasm! {
     InitOptions{app, registry, executor_options}
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn setup_test() {
     init_wasm();
 }
