@@ -17,13 +17,19 @@
 
 use bevy_app;
 use bevy_impulse::{
-    Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, Promise, RequestExt,
-    RunCommandsOnWorldExt,
+    Diagram, DiagramError, ImpulseAppPlugin, Promise, RequestExt, RunCommandsOnWorldExt,
 };
 use crate::{new_router, ServerOptions};
 use clap::Parser;
 use std::thread;
-use std::{error::Error, fs::File, str::FromStr};
+use std::{fs::File, str::FromStr};
+
+pub use bevy_impulse::DiagramElementRegistry;
+pub use std::error::Error;
+
+pub mod prelude {
+    pub use bevy_impulse::prelude::*;
+}
 
 #[derive(Parser, Debug)]
 #[clap(

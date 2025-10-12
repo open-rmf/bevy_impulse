@@ -65,7 +65,14 @@ debug = ["router", "axum/ws"]
 frontend = ["router", "dep:flate2", "dep:tar"]
 router = []
 json_schema = ["dep:schemars", "dep:indexmap"]
-basic_executor = ["dep:clap", "dep:tracing-subscriber"]
+basic_executor = [
+  "router",
+  "frontend",
+  "dep:clap",
+  "dep:tracing-subscriber",
+  "tokio/rt-multi-thread",
+  "axum/default",
+]
 
 [[bin]]
 name = "print_schema"
