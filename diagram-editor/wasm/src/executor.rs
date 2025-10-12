@@ -58,6 +58,7 @@ pub async fn post_run(request: PostRunRequestWasm) -> Result<JsValue, JsValue> {
 }
 
 #[cfg(test)]
+#[cfg(target_arch = "wasm32")]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 

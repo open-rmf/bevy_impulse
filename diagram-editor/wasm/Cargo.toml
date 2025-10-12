@@ -25,20 +25,20 @@ categories = [
 ]
 
 [dependencies]
-axum = { version = "0.8.4", features = ["json"], default-features = false }
-bevy_app = "0.12.1"
+axum = { workspace = true, features = ["json"], default-features = false }
+bevy_app = { workspace = true }
 bevy_impulse = { version = "0.0.2", path = "../..", features = [
   "diagram",
   "single_threaded_async",
 ] }
 bevy_impulse_diagram_editor = { version = "0.0.1", path = "..", default-features = false }
-mime_guess = { version = "2.0.5" }
-serde_json = "1.0.140"
+mime_guess = { workspace = true }
+serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6.5"
-wasm-bindgen = "0.2.100"
+wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = "0.4.50"
-tokio = { version = "1.47.1", default-features = false, features = ["rt"] }
-futures = "0.3.31"
+tokio = { workspace = true, default-features = false, features = ["rt"] }
+futures = { workspace = true }
 serde.workspace = true
 
 [build-dependencies]
