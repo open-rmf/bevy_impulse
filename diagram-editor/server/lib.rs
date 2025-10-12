@@ -7,3 +7,6 @@ pub mod api;
 
 #[cfg(feature = "frontend")]
 mod frontend;
+
+#[cfg(feature = "basic_executor")]
+pub mod basic_executor;
