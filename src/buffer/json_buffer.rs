@@ -256,7 +256,10 @@ impl<'a> JsonBufferView<'a> {
 
     /// Iterate through the current elements of the buffer.
     pub fn iter(&self) -> IterJsonBufferView<'a, '_> {
-        IterJsonBufferView { index: 0, view: self }
+        IterJsonBufferView {
+            index: 0,
+            view: self,
+        }
     }
 
     /// Check whether the gate of this buffer is open or closed.

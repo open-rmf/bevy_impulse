@@ -70,8 +70,7 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    is_default,
-    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
+    is_default, Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
     SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
