@@ -2,7 +2,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use bevy_impulse::{Cancellation, CancellationCause};
+use bevy_impulse::Cancellation;
 
 pub(super) struct WorkflowCancelledResponse<'a>(pub(super) &'a Cancellation);
 
