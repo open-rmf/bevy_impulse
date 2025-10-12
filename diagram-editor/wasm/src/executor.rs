@@ -6,7 +6,7 @@ use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
 use super::globals;
-use crate::{errors::IntoJsResult, with_bevy_app_async};
+use crate::{errors::IntoJsResult, with_bevy_sup_app_async};
 
 #[wasm_bindgen(typescript_custom_section)]
 const PostRunRequestTs: &'static str =
@@ -40,7 +40,7 @@ pub async fn post_run(request: PostRunRequestWasm) -> Result<JsValue, JsValue> {
         Json(request.0),
     ));
 
-    with_bevy_app_async(async |app| {
+    with_bevy_sup_app_async(async |app| {
         let waker = noop_waker();
         let mut poll_ctx = std::task::Context::from_waker(&waker);
         loop {

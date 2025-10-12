@@ -36,10 +36,10 @@ fn main() {
         TimePlugin::default(),
     ));
 
-    let process_door_request = app.world.spawn_service(process_request);
+    let process_door_request = app.world_mut().spawn_service(process_request);
     let door_controller = app.spawn_continuous_service(Update, door_controller);
     let door_state_notifier = app
-        .world
+        .world_mut()
         .spawn_service(door_state_notifier.into_blocking_service());
 
     for door_name in args.names {
@@ -47,7 +47,7 @@ fn main() {
         let state_topic_name = format!("door_state/{door_name}");
 
         let workflow =
-            app.world
+            app.world_mut()
                 .spawn_io_workflow::<(), Result<(), ArcError>, _>(|scope, builder| {
                     let command_buffer = builder.create_buffer(BufferSettings::default());
                     let position_buffer = builder.create_buffer(BufferSettings::default());
@@ -98,7 +98,7 @@ fn main() {
                         .connect(publisher.input);
                 });
 
-        app.world.command(|commands| {
+        app.world_mut().command(|commands| {
             let _ = commands.request((), workflow).detach();
         });
     }
@@ -211,7 +211,7 @@ fn door_controller(
             DoorCommand::Close => {
                 if state.position < 1.0 {
                     // The door is not closed, so let's drive it toward 1.0
-                    let delta = state.nominal_speed * time.delta_seconds();
+                    let delta = state.nominal_speed * time.delta_secs();
                     let new_position = f32::min(state.position + delta, 1.0);
                     state.position = new_position;
                     if new_position == 1.0 {
@@ -227,7 +227,7 @@ fn door_controller(
             DoorCommand::Open => {
                 if state.position > 0.0 {
                     // The door is not open, so let's drive it toward 0.0
-                    let delta = state.nominal_speed * time.delta_seconds();
+                    let delta = state.nominal_speed * time.delta_secs();
                     let new_position = f32::max(state.position - delta, 0.0);
                     state.position = new_position;
                     if new_position == 0.0 {

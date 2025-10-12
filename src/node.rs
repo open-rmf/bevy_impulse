@@ -128,7 +128,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
         Response: Clone,
     {
         assert_eq!(self.scope, builder.scope());
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(self.scope),
             self.target,
             ForkClone::<Response>::new(ForkTargetStorage::new()),
@@ -171,7 +171,7 @@ impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
             .commands
             .spawn((SingleInputStorage::new(self.id()), UnusedTarget))
             .id();
-        builder.commands.add(AddBranchToForkClone {
+        builder.commands.queue(AddBranchToForkClone {
             source: self.source,
             target,
         });

@@ -6,10 +6,10 @@ pub use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
 use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorState};
 
 static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
-static BEVY_APP: Mutex<Option<bevy_app::App>> = Mutex::new(None);
+static BEVY_APP: Mutex<Option<bevy_app::SubApp>> = Mutex::new(None);
 
 pub struct InitOptions {
-    pub app: bevy_app::App,
+    pub app: bevy_app::SubApp,
     pub registry: DiagramElementRegistry,
     pub executor_options: ExecutorOptions,
 }
@@ -26,7 +26,7 @@ pub fn setup_wasm(
     BEVY_APP.lock().unwrap().replace(app);
 }
 
-pub(super) async fn with_bevy_app_async<R>(f: impl AsyncFnOnce(&mut bevy_app::App) -> R) -> R {
+pub(super) async fn with_bevy_sup_app_async<R>(f: impl AsyncFnOnce(&mut bevy_app::SubApp) -> R) -> R {
     let mut mg = BEVY_APP.lock().unwrap();
     let app = mg.as_mut().expect("`init_wasm` not called");
     f(app).await

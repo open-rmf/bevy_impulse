@@ -537,7 +537,7 @@ mod tests {
         register(&mut registry);
 
         let mut promise = app
-            .world
+            .world_mut()
             .command(|cmds| -> Result<Promise<JsonMessage>, DiagramError> {
                 let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
                 Ok(cmds.request(request, workflow).take_response())

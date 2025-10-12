@@ -119,7 +119,7 @@ impl DiagramElementRegistry {
             NodeBuilderOptions::new("zenoh_subscription")
                 .with_default_display_text("Zenoh Subscription"),
             move |builder, config: ZenohSubscriptionConfig| {
-                builder.commands().add(ensure_session.clone());
+                builder.commands().queue(ensure_session.clone());
 
                 let active_buffer = builder.create_buffer::<()>(BufferSettings::default());
                 let access = builder.create_buffer_access::<(), _>(active_buffer);
@@ -231,7 +231,7 @@ impl DiagramElementRegistry {
                         input
                             .channel
                             .command(move |commands| {
-                                commands.add(move |world: &mut World| {
+                                commands.queue(move |world: &mut World| {
                                     let _ = world.buffer_mut(&active_key, |mut active_buffer| {
                                         active_buffer.drain(..);
                                     });

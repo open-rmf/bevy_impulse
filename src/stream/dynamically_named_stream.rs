@@ -15,8 +15,7 @@
  *
 */
 
-use bevy_ecs::prelude::{Commands, Entity, World};
-use bevy_hierarchy::BuildChildren;
+use bevy_ecs::prelude::{Commands, Entity, World, ChildOf};
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 use tokio::sync::mpsc::unbounded_channel;
@@ -64,7 +63,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
     ) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             Some(in_scope),
             source,
             RedirectScopeStream::<Self>::new(target),
@@ -78,7 +77,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
 
     fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
         let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             source,
             RedirectWorkflowStream::new(NamedStreamRedirect::<S>::dynamic()),
@@ -110,11 +109,11 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
             .spawn(())
             // Set the parent of this stream to be the impulse so it can be
             // recursively despawned together.
-            .set_parent(source)
+            .insert(ChildOf(source))
             .id();
 
         map.add_anonymous::<NamedValue<S::Output>>(target, commands);
-        commands.add(AddImpulse::new(None, target, TakenStream::new(sender)));
+        commands.queue(AddImpulse::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -125,8 +124,8 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) {
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(
+        let redirect = commands.spawn(()).insert(ChildOf(source)).id();
+        commands.queue(AddImpulse::new(
             None,
             redirect,
             Push::<NamedValue<S::Output>>::new(target, true),
@@ -195,7 +194,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         session: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(SendNamedStreams::<
+        commands.queue(SendNamedStreams::<
             S,
             DefaultStreamBufferContainer<NamedValue<S::Input>>,
         >::new(

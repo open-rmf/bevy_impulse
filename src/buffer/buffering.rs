@@ -15,9 +15,11 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, World};
-use bevy_hierarchy::BuildChildren;
-use bevy_utils::all_tuples;
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Entity, World},
+};
+use variadics_please::all_tuples;
 
 use smallvec::SmallVec;
 
@@ -75,7 +77,7 @@ pub trait Joining: Buffering {
 
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(scope),
             join,
             Join::new(self, target),
@@ -108,7 +110,7 @@ pub trait Accessing: Buffering {
 
         let listen = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(scope),
             listen,
             Listen::new(self, target),
@@ -120,7 +122,7 @@ pub trait Accessing: Buffering {
     fn access<T: 'static + Send + Sync>(self, builder: &mut Builder) -> Node<T, (T, Self::Key)> {
         let source = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             source,
             OperateBufferAccess::<T, Self>::new(self, target),
@@ -194,13 +196,14 @@ pub trait Accessing: Buffering {
             build,
         );
 
+        let scope = builder.scope();
         let begin_cancel = builder
             .commands
             .spawn(())
-            .set_parent(builder.context.scope)
+            .insert(ChildOf(scope))
             .id();
         self.verify_scope(builder.scope());
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             None,
             begin_cancel,
             BeginCleanupWorkflow::<Self>::new(

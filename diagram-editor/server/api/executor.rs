@@ -11,7 +11,7 @@ use axum::{
 };
 #[cfg(feature = "router")]
 use axum::{routing::post, Router};
-use bevy_ecs::schedule::IntoSystemConfigs;
+use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -281,7 +281,7 @@ where
     };
 }
 
-#[derive(bevy_ecs::system::Resource)]
+#[derive(bevy_ecs::prelude::Resource)]
 struct RequestReceiver(tokio::sync::mpsc::Receiver<Context>);
 
 /// Receives a request from executor service and schedules the workflow.
@@ -314,7 +314,7 @@ fn execute_requests(
         Err(err) => match err {
             TryRecvError::Empty => {}
             TryRecvError::Disconnected => {
-                app_exit_events.send_default();
+                app_exit_events.write_default();
             }
         },
     }
@@ -360,7 +360,7 @@ impl Default for ExecutorOptions {
 }
 
 pub fn setup_bevy_app(
-    app: &mut bevy_app::App,
+    app: &mut bevy_app::SubApp,
     registry: DiagramElementRegistry,
     options: &ExecutorOptions,
 ) -> ExecutorState {
@@ -381,7 +381,7 @@ pub(super) fn new_router(
     registry: DiagramElementRegistry,
     options: ExecutorOptions,
 ) -> Router {
-    let executor_state = setup_bevy_app(app, registry, &options);
+    let executor_state = setup_bevy_app(&mut app.sub_apps_mut().main, registry, &options);
 
     let router = Router::new().route("/run", post(post_run));
 
@@ -428,28 +428,36 @@ mod tests {
         cleanup_test: CleanupFn,
     }
 
-    fn setup_test() -> TestFixture<impl FnOnce()> {
+    async fn setup_test() -> TestFixture<impl FnOnce()> {
         let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(NodeBuilderOptions::new("add7"), |builder, _config: ()| {
             builder.create_map_block(|req: i32| req + 7)
         });
 
-        let mut app = bevy_app::App::new();
-        app.add_plugins(ImpulseAppPlugin::default());
         let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel::<()>();
-        app.add_systems(
-            bevy_app::Update,
-            move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
-                if let Ok(_) = recv_stop.try_recv() {
-                    app_exit.send_default();
-                }
-            },
-        );
+        let (router_sender, router_receiver) = tokio::sync::oneshot::channel();
 
-        let router = new_router(&mut app, registry, ExecutorOptions::default());
         let join_handle = thread::spawn(move || {
+            // We need to instantiate the App inside the thread that it will run
+            // inside because App is no longer Send as of Bevy 0.14.
+            let mut app = bevy_app::App::new();
+            app.add_plugins(ImpulseAppPlugin::default());
+            app.add_systems(
+                bevy_app::Update,
+                move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
+                    if let Ok(_) = recv_stop.try_recv() {
+                        app_exit.write_default();
+                    }
+                },
+            );
+
+            let router = new_router(&mut app, registry, ExecutorOptions::default());
+            let _ = router_sender.send(router);
+
             app.run();
         });
+
+        let router = router_receiver.await.unwrap();
 
         TestFixture {
             router,
@@ -481,7 +489,7 @@ mod tests {
         let TestFixture {
             router,
             cleanup_test,
-        } = setup_test();
+        } = setup_test().await;
 
         let diagram = new_add7_diagram();
 

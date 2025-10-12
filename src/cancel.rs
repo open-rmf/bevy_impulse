@@ -439,7 +439,7 @@ pub fn try_emit_broken(
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
-    if let Some(mut source_mut) = world.get_entity_mut(source) {
+    if let Ok(mut source_mut) = world.get_entity_mut(source) {
         source_mut.emit_broken(backtrace, roster);
     } else {
         world

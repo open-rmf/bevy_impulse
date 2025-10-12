@@ -22,10 +22,9 @@ use crate::{
 
 use bevy_derive::Deref;
 use bevy_ecs::{
-    prelude::{Component, Entity, World},
-    system::Command,
+    hierarchy::ChildOf,
+    prelude::{Command, Component, Entity, World},
 };
-use bevy_hierarchy::prelude::BuildWorldChildren;
 
 use backtrace::Backtrace;
 
@@ -640,7 +639,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
         if let Some(scope) = self.scope {
             source_mut
                 .insert(ScopeStorage::new(scope))
-                .set_parent(scope);
+                .insert(ChildOf(scope));
             match world.get_mut::<ScopeContents>(scope).or_broken() {
                 Ok(mut contents) => {
                     contents.add_node(self.source);
@@ -677,7 +676,7 @@ pub fn execute_operation(request: OperationRequest) {
             // which end up getting dropped during a cleanup. In that case, the
             // source entity will be totally despawned, so check for that before
             // concluding that this is broken.
-            if request.world.get_entity(request.source).is_some() {
+            if request.world.get_entity(request.source).is_ok() {
                 // The node does not have an operation and is not an unused target,
                 // so this is broken somehow.
                 request

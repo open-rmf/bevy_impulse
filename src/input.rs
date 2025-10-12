@@ -16,13 +16,12 @@
 */
 
 use bevy_ecs::{
-    prelude::{Bundle, Component, Entity},
-    system::Command,
+    prelude::{Bundle, Command, Component, Entity},
     world::{EntityRef, EntityWorldMut, World},
 };
 
 #[cfg(feature = "trace")]
-use bevy_hierarchy::Parent;
+use bevy_ecs::prelude::ChildOf;
 
 use smallvec::SmallVec;
 
@@ -304,8 +303,8 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                         let mut session_stack = SmallVec::new();
                         session_stack.push(input.session);
                         let mut session = input.session;
-                        while let Some(next_session) = world.get::<Parent>(session) {
-                            session = next_session.get();
+                        while let Some(next_session) = world.get::<ChildOf>(session) {
+                            session = next_session.parent();
                             session_stack.push(session);
                         }
                         session_stack.reverse();

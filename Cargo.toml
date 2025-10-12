@@ -17,13 +17,13 @@ categories = [
 
 [workspace.dependencies]
 axum = "0.8.4"
-bevy_app = "0.12.1"
-bevy_core = "0.12.1"
-bevy_derive = "0.12.1"
-bevy_ecs = "0.12.1"
-bevy_hierarchy = "0.12.1"
-bevy_time = "0.12.1"
-bevy_utils = "0.12.1"
+bevy_app = "0.16"
+bevy_derive = "0.16"
+bevy_diagnostic = "0.16"
+bevy_ecs = "0.16"
+bevy_tasks = "0.16"
+bevy_time = "0.16"
+bevy_utils = "0.16"
 clap = { version = "4.5.23", features = ["derive"] }
 mime_guess = "2.0.5"
 schemars = "0.9.0"
@@ -42,15 +42,15 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 uuid = "1.13.1"
 wasm-bindgen = "0.2.100"
-zenoh = "1.3.2"
-zenoh-ext = "1.4.0"
+zenoh = "1.5.1"
+zenoh-ext = "1.5.1"
 
 [dependencies]
 bevy_impulse_derive = { path = "macros", version = "0.0.2" }
 bevy_ecs = { workspace = true }
 bevy_utils = { workspace = true }
-bevy_hierarchy = { workspace = true }
 bevy_derive = { workspace = true }
+bevy_diagnostic = { workspace = true }
 bevy_app = { workspace = true }
 
 async-task = { version = "4.7.1", optional = true }
@@ -58,7 +58,7 @@ async-task = { version = "4.7.1", optional = true }
 # TODO(@mxgrey) We could probably remove bevy_tasks when the single_threaded_async
 # feature is active, but we'd have to refactor some internal usage of
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
-bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
+bevy_tasks = { workspace = true, features = ["multi_threaded"] }
 
 itertools = "0.13"
 smallvec = { version = "1.13", features = ["serde"] }
@@ -73,7 +73,6 @@ thiserror = "1.0"
 # the testing module for doctests, and doctests can only
 # make use of default features, so we're a bit stuck with
 # these for now.
-bevy_core = { workspace = true }
 bevy_time = { workspace = true }
 
 schemars = { workspace = true, optional = true }
@@ -99,6 +98,8 @@ zenoh-ext = { workspace = true, features = ["unstable"], optional = true }
 tracing = { workspace = true }
 strum = { version = "0.26.3", optional = true, features = ["derive"] }
 semver = { version = "1.0.24", optional = true }
+
+variadics_please = "1.1"
 
 [target.wasm32-unknown-unknown.dependencies]
 uuid = { workspace = true, default-features = false, features = ["js"] }
@@ -133,6 +134,7 @@ zenoh = [
   "dep:zenoh-ext",
   "dep:prost-reflect",
   "dep:futures-lite",
+  "dep:tonic-prost-build",
 ]
 
 # Turn on all capability related features. This differs from --all-features

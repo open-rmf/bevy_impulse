@@ -17,10 +17,8 @@
 
 use crate::{
     check_reachability,
-    dyn_node::{DynInputSlot, DynOutput},
     execute_operation, is_downstream_of,
-    type_info::TypeInfo,
-    Accessing, AddOperation, Blocker, Broken, BufferKeyBuilder, Builder, BuilderScopeContext,
+    Accessing, AddOperation, Blocker, BufferKeyBuilder,
     Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn, CollectMarker,
     DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest, Input, InputBundle,
     InspectDisposals, ManageCancellation, ManageInput, NamedTarget, NamedValue, Operation,
@@ -30,23 +28,35 @@ use crate::{
     UnhandledErrors, Unreachability, UnusedTarget,
 };
 
+#[cfg(feature = "diagram")]
+use crate::{
+    dyn_node::{DynInputSlot, DynOutput},
+    type_info::TypeInfo,
+    Broken, Builder, BuilderScopeContext,
+};
+
 use backtrace::Backtrace;
 
 use bevy_derive::Deref;
 use bevy_ecs::{
+    hierarchy::ChildOf,
     prelude::{Commands, Component, Entity, World},
-    system::Command,
 };
-use bevy_hierarchy::{BuildChildren, BuildWorldChildren, DespawnRecursiveExt};
+
+#[cfg(feature = "diagram")]
+use bevy_ecs::prelude::Command;
 
 use smallvec::SmallVec;
 
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "diagram")]
+use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "diagram")]
 use thiserror::Error as ThisError;
 
 // TODO(@mxgrey): Consider whether ParentSession is now redundant with the
@@ -103,11 +113,13 @@ impl TypeSensitiveScopeComponents {
     }
 }
 
+#[cfg(feature = "diagram")]
 struct InsertTypeSensitiveComponents {
     source: Entity,
     components: TypeSensitiveScopeComponents,
 }
 
+#[cfg(feature = "diagram")]
 impl Command for InsertTypeSensitiveComponents {
     fn apply(self, world: &mut World) {
         let r = self.components.apply(OperationSetup {
@@ -365,7 +377,7 @@ fn dyn_begin_scope<Request: 'static + Send + Sync>(
 
     let scoped_session = world
         .spawn((ParentSession(input.session), SessionStatus::Active))
-        .set_parent(input.session)
+        .insert(ChildOf(input.session))
         .id();
 
     begin_scope(
@@ -497,8 +509,8 @@ where
     if result.is_err() {
         // We won't be executing this scope after all, so despawn the scoped
         // session that we created.
-        if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-            scoped_session_mut.despawn_recursive();
+        if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+            scoped_session_mut.despawn();
         }
         return result;
     }
@@ -632,10 +644,10 @@ impl OperateScope {
         // update the implementation of IncrementalScopeBuilder.
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
-        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let terminal = commands.spawn(()).insert(ChildOf(scope_id)).id();
         let finish_scope_cancel = commands
             .spawn(FinishCleanupForScope(scope_id))
-            .set_parent(scope_id)
+            .insert(ChildOf(scope_id))
             .id();
 
         let scope = OperateScope {
@@ -652,9 +664,9 @@ impl OperateScope {
         // Note: We need to make sure the scope object gets set up before any of
         // its endpoints, otherwise the ScopeContents component will be missing
         // during setup.
-        commands.add(AddOperation::new(parent_scope, scope_id, scope));
+        commands.queue(AddOperation::new(parent_scope, scope_id, scope));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the terminal node to be "inside" the scope,
             // otherwise it will get cleaned up prematurely
             None,
@@ -662,7 +674,7 @@ impl OperateScope {
             Terminate::<Response>::new(scope_id),
         ));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the finish cancel node to be "inside" the
             // scope, otherwise it will get cleaned up prematurely
             None,
@@ -682,11 +694,13 @@ impl OperateScope {
 /// request and response messages is discovered. This is used by the scope
 /// operation of the diagram module, which needs to build the scope gradually
 /// while it discovers type information at runtime.
+#[cfg(feature = "diagram")]
 #[derive(Clone)]
 pub(crate) struct IncrementalScopeBuilder {
     inner: Arc<Mutex<IncrementalScopeBuilderInner>>,
 }
 
+#[cfg(feature = "diagram")]
 #[derive(ThisError, Debug)]
 #[error("An error happened while building a dynamic scope")]
 pub enum IncrementalScopeError {
@@ -709,24 +723,29 @@ pub enum IncrementalScopeError {
     },
 }
 
+#[cfg(feature = "diagram")]
 #[derive(Debug)]
 pub(crate) struct IncrementalScopeRequest {
     pub(crate) external_input: DynInputSlot,
     pub(crate) begin_scope: Option<DynOutput>,
 }
 
+#[cfg(feature = "diagram")]
 pub(crate) type IncrementalScopeRequestResult =
     Result<IncrementalScopeRequest, IncrementalScopeError>;
 
+#[cfg(feature = "diagram")]
 #[derive(Debug)]
 pub(crate) struct IncrementalScopeResponse {
     pub(crate) terminate: DynInputSlot,
     pub(crate) external_output: Option<DynOutput>,
 }
 
+#[cfg(feature = "diagram")]
 pub(crate) type IncrementalScopeResponseResult =
     Result<IncrementalScopeResponse, IncrementalScopeError>;
 
+#[cfg(feature = "diagram")]
 impl IncrementalScopeBuilder {
     pub(crate) fn begin(settings: ScopeSettings, builder: &mut Builder) -> IncrementalScopeBuilder {
         let parent_scope = builder.scope();
@@ -737,10 +756,10 @@ impl IncrementalScopeBuilder {
         let scope_id = commands.spawn(()).id();
         let exit_scope = commands.spawn(UnusedTarget).id();
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
-        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let terminal = commands.spawn(()).insert(ChildOf(scope_id)).id();
         let finish_scope_cancel = commands
             .spawn(FinishCleanupForScope(scope_id))
-            .set_parent(scope_id)
+            .insert(ChildOf(scope_id))
             .id();
 
         commands
@@ -754,7 +773,7 @@ impl IncrementalScopeBuilder {
             finish_scope_cancel,
             components: None,
         };
-        commands.add(AddOperation::new(Some(parent_scope), scope_id, scope));
+        commands.queue(AddOperation::new(Some(parent_scope), scope_id, scope));
 
         IncrementalScopeBuilder {
             inner: Arc::new(Mutex::new(IncrementalScopeBuilderInner {
@@ -825,7 +844,7 @@ impl IncrementalScopeBuilder {
                 });
             }
         } else {
-            commands.add(AddOperation::new(
+            commands.queue(AddOperation::new(
                 // We do not consider the terminal node to be "inside" the scope,
                 // otherwise it will get cleaned up prematurely
                 None,
@@ -833,7 +852,7 @@ impl IncrementalScopeBuilder {
                 Terminate::<Response>::new(inner.scope_id),
             ));
 
-            commands.add(AddOperation::new(
+            commands.queue(AddOperation::new(
                 // We do not consider the finish cancel node to be "inside" the
                 // scope, otherwise it will get cleaned up prematurely
                 None,
@@ -873,6 +892,7 @@ impl IncrementalScopeBuilder {
     }
 }
 
+#[cfg(feature = "diagram")]
 struct IncrementalScopeBuilderInner {
     parent_scope: Entity,
     scope_id: Entity,
@@ -887,6 +907,7 @@ struct IncrementalScopeBuilderInner {
     external_output_not_sent: bool,
 }
 
+#[cfg(feature = "diagram")]
 impl IncrementalScopeBuilderInner {
     fn consider_building(&mut self, commands: &mut Commands) {
         if self.already_built {
@@ -900,7 +921,7 @@ impl IncrementalScopeBuilderInner {
             return;
         };
 
-        commands.add(InsertTypeSensitiveComponents {
+        commands.queue(InsertTypeSensitiveComponents {
             source: self.scope_id,
             components: TypeSensitiveScopeComponents {
                 dyn_scope_request,
@@ -1526,7 +1547,7 @@ where
 
         let cancellation_session = world
             .spawn((ParentSession(scoped_session), SessionStatus::Active))
-            .set_parent(scoped_session)
+            .insert(ChildOf(scoped_session))
             .id();
         world
             .get_entity_mut(target)
@@ -1891,9 +1912,9 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
 
         clear_scope_buffers(scope, scoped_session, world)?;
 
-        if world.get_entity(scoped_session).is_some() {
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-                scoped_session_mut.despawn_recursive();
+        if world.get_entity(scoped_session).is_ok() {
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn();
             }
         }
 
@@ -2192,12 +2213,7 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        dyn_node::DynOutput,
-        operation::{IncrementalScopeError, IncrementalScopeRequest, IncrementalScopeResponse},
-        prelude::*,
-        testing::*,
-    };
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn test_scope_race() {
@@ -2237,6 +2253,13 @@ mod tests {
         assert_eq!(result, "fast");
     }
 
+    #[cfg(feature = "diagram")]
+    use crate::{
+        dyn_node::DynOutput,
+        operation::{IncrementalScopeError, IncrementalScopeRequest, IncrementalScopeResponse}
+    };
+
+    #[cfg(feature = "diagram")]
     #[test]
     fn test_incremental_scope_race() {
         let mut context = TestingContext::minimal_plugins();

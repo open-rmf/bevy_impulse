@@ -189,7 +189,7 @@ impl DiagramElementRegistry {
         self.register_node_builder_fallible(
             NodeBuilderOptions::new("zenoh_querier").with_default_display_text("Zenoh Querier"),
             move |builder, mut config: ZenohQuerierConfig| {
-                builder.commands().add(ensure_session.clone());
+                builder.commands().queue(ensure_session.clone());
 
                 let encoder: Codec = (&config.encoder).try_into()?;
                 let decoder: Codec = (&config.decoder).try_into()?;

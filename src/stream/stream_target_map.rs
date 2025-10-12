@@ -47,7 +47,7 @@ impl StreamTargetMap {
                 vacant.insert(target);
             }
             Entry::Occupied(_) => {
-                commands.add(move |world: &mut World| {
+                commands.queue(move |world: &mut World| {
                     world
                         .get_resource_or_insert_with(|| UnhandledErrors::default())
                         .duplicate_streams
@@ -72,7 +72,7 @@ impl StreamTargetMap {
                 vacant.insert((TypeId::of::<T>(), target));
             }
             Entry::Occupied(_) => {
-                commands.add(move |world: &mut World| {
+                commands.queue(move |world: &mut World| {
                     world
                         .get_resource_or_insert_with(|| UnhandledErrors::default())
                         .duplicate_streams
