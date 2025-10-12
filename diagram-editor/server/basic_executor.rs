@@ -15,11 +15,11 @@
  *
 */
 
+use crate::{new_router, ServerOptions};
 use bevy_app;
 use bevy_impulse::{
     Diagram, DiagramError, ImpulseAppPlugin, Promise, RequestExt, RunCommandsOnWorldExt,
 };
-use crate::{new_router, ServerOptions};
 use clap::Parser;
 use std::thread;
 use std::{fs::File, str::FromStr};
@@ -88,7 +88,10 @@ pub fn headless(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), B
     Ok(())
 }
 
-pub async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
+pub async fn serve(
+    args: ServeArgs,
+    registry: DiagramElementRegistry,
+) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
     let mut app = bevy_app::App::new();
@@ -115,7 +118,10 @@ pub async fn run_async(registry: DiagramElementRegistry) -> Result<(), Box<dyn E
     run_async_with_args(Args::parse(), registry).await
 }
 
-pub async fn run_async_with_args(args: Args, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
+pub async fn run_async_with_args(
+    args: Args,
+    registry: DiagramElementRegistry,
+) -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
     match args.command {
         Commands::Run(args) => headless(args, registry),
