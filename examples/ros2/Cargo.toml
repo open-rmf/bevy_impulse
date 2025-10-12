@@ -16,22 +16,23 @@ name = "goal-requester"
 path = "src/goal_requester.rs"
 
 [dependencies]
-axum = "0.8.4"
-bevy_app = "0.12"
-bevy_core = "0.12"
-bevy_impulse = { path = "../..", features = ["diagram", "ros2"] }
-bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../diagram-editor" }
-serde = { workspace = true }
-schemars = { workspace = true }
-serde_json = { workspace = true }
-clap = { version = "*", features = ["derive"] }
-rand = "*"
-tracing-subscriber = "0.3.19"
-tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
+# Dependency to help us run the diagram editor and executor
+bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../diagram-editor", features = ["basic_executor"] }
 
+# Dependencies for the nav operation catalog
+bevy_impulse = { version = "0.0.2", path = "../..", features = ["diagram", "ros2"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+# Dependencies for our custom ROS operations
 rclrs = { workspace = true }
 nav_msgs = { version = "*", features = ["serde", "schemars"] }
 geometry_msgs = { version = "*", features = ["serde", "schemars"] }
 std_msgs = { version = "*", features = ["serde", "schemars"] }
 builtin_interfaces = { version = "*", features = ["serde", "schemars"] }
 example_interfaces = { version = "*", features = ["serde", "schemars"] }
+
+# Dependencies for goal-requester and fake-plan-generator
+clap = { workspace = true }
+rand = "0.9.2"

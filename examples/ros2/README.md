@@ -17,7 +17,7 @@ source install/setup.bash # run in the root of your colcon workspace
 2. Then you can go into this `examples/ros2` directory and run the example with
 
 ```bash
-cargo run --bin nav-executor -- run # run in this directory
+cargo run --bin nav-executor -- run diagrams/default-nav-system.json # run in this directory
 ```
 
 3. The `nav-example` workflow will wait until it receives some goals to process. You can send it some randomized goals by **opening a new terminal** in the same directory and running
