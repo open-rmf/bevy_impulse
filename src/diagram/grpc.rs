@@ -16,7 +16,7 @@
 */
 
 use super::*;
-use crate::AsyncMap;
+use crate::{AsyncMap, NeverFinish};
 
 use std::{future::Future, sync::Arc, time::Duration};
 
@@ -401,7 +401,7 @@ impl Decoder for DynamicMessageCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{diagram::testing::*, prelude::*, testing::*};
+    use crate::{diagram::testing::*, prelude::*, testing::*, utils::*};
     use futures::channel::oneshot::{self, Sender as OneShotSender};
     use prost_reflect::Kind;
     use protos::{
