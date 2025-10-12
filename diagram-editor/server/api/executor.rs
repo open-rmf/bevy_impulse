@@ -11,7 +11,7 @@ use axum::{
 };
 #[cfg(feature = "router")]
 use axum::{routing::post, Router};
-use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_ecs::{schedule::IntoScheduleConfigs, prelude::Entity};
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +31,7 @@ use crate::api::error_responses::WorkflowCancelledResponse;
 #[cfg(feature = "debug")]
 type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
 
-type WorkflowResponseResult = Result<Promise<serde_json::Value>, Box<dyn Error + Send + Sync>>;
+type WorkflowResponseResult = Result<(Promise<serde_json::Value>, Entity), Box<dyn Error + Send + Sync>>;
 type WorkflowResponseSender = tokio::sync::oneshot::Sender<WorkflowResponseResult>;
 
 type WorkflowFeedback = OperationStarted;
@@ -51,6 +51,7 @@ pub struct Context {
 pub struct ExecutorState {
     pub registry: Arc<Mutex<DiagramElementRegistry>>,
     pub send_chan: tokio::sync::mpsc::Sender<Context>,
+    pub despawn_chan: tokio::sync::mpsc::Sender<Entity>,
     pub response_timeout: Duration,
 }
 
@@ -92,8 +93,12 @@ pub async fn post_run(
     };
 
     let response = (match workflow_response {
-        Ok(promise) => {
+        Ok((promise, workflow)) => {
             let promise_state = promise.await;
+            if let Err(err) = state.despawn_chan.send(workflow).await {
+                error!("Failed to request workflow despawn: {err}");
+            }
+
             if promise_state.is_available() {
                 if let Some(result) = promise_state.available() {
                     Ok(result)
@@ -284,6 +289,10 @@ where
 #[derive(bevy_ecs::prelude::Resource)]
 struct RequestReceiver(tokio::sync::mpsc::Receiver<Context>);
 
+/// Receiver for workflows that need to be despawned.
+#[derive(bevy_ecs::prelude::Resource)]
+struct WorkflowDespawnReceiver(tokio::sync::mpsc::Receiver<Entity>);
+
 /// Receives a request from executor service and schedules the workflow.
 fn execute_requests(
     mut rx: bevy_ecs::system::ResMut<RequestReceiver>,
@@ -302,7 +311,7 @@ fn execute_requests(
                     if let Some(feedback_tx) = ctx.feedback_tx {
                         cmds.entity(session).insert(feedback_tx);
                     }
-                    Ok(promise)
+                    Ok((promise, workflow.provider()))
                 }
                 Err(err) => Err(err.into()),
             };
@@ -346,6 +355,19 @@ fn debug_feedback(
     }
 }
 
+fn despawn_workflows(
+    mut receiver: bevy_ecs::system::ResMut<WorkflowDespawnReceiver>,
+    mut commands: bevy_ecs::system::Commands,
+) {
+    while let Ok(workflow) = receiver.0.try_recv() {
+        let Ok(mut e) = commands.get_entity(workflow) else {
+            continue;
+        };
+
+        e.despawn();
+    }
+}
+
 #[non_exhaustive]
 pub struct ExecutorOptions {
     pub response_timeout: Duration,
@@ -365,12 +387,17 @@ pub fn setup_bevy_app(
     options: &ExecutorOptions,
 ) -> ExecutorState {
     let (request_tx, request_rx) = tokio::sync::mpsc::channel::<Context>(10);
+    let (despawn_tx, despawn_rx) = tokio::sync::mpsc::channel(10);
     app.insert_resource(RequestReceiver(request_rx));
+    app.insert_resource(WorkflowDespawnReceiver(despawn_rx));
     app.add_systems(bevy_app::Update, execute_requests);
     app.add_systems(bevy_app::Update, debug_feedback.after(execute_requests));
+    app.add_systems(bevy_app::Update, despawn_workflows);
+
     ExecutorState {
         registry: Arc::new(Mutex::new(registry)),
         send_chan: request_tx,
+        despawn_chan: despawn_tx,
         response_timeout: options.response_timeout,
     }
 }

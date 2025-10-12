@@ -380,6 +380,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
                 })
             },
         )
+        .with_fork_result_minimal()
         .with_deserialize_request();
 
     let less_than_description = "Compares for a less-than relationship, \
