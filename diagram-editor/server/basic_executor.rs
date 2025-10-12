@@ -128,5 +128,3 @@ pub async fn run_async_with_args(
         Commands::Serve(args) => serve(args, registry).await,
     }
 }
-
-// fn run_with_args
