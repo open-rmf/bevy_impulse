@@ -61,6 +61,8 @@ pub struct NodeRegistration {
     pub(super) response: TypeInfo,
     pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
+    pub(super) description: Option<String>,
+    pub(super) example_configs: Vec<ConfigExample>,
 
     /// Creates an instance of the registered node.
     #[serde(skip)]
@@ -243,6 +245,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 
                 Ok(node.into())
             })),
+            description: options.description,
+            example_configs: options.examples_configs,
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
@@ -650,6 +654,8 @@ pub struct SectionRegistration {
     pub(super) default_display_text: DisplayText,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
+    pub(super) description: Option<String>,
+    pub(super) example_configs: Vec<ConfigExample>,
 
     #[serde(skip)]
     create_section_impl: RefCell<Box<CreateSectionFn>>,
@@ -673,7 +679,7 @@ where
 {
     fn into_section_registration(
         self,
-        name: BuilderId,
+        options: &SectionBuilderOptions,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration;
 }
@@ -686,17 +692,23 @@ where
 {
     fn into_section_registration(
         mut self,
-        name: BuilderId,
+        options: &SectionBuilderOptions,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration {
         SectionRegistration {
-            default_display_text: name,
+            default_display_text: options
+                .default_display_text
+                .as_ref()
+                .unwrap_or(&options.id)
+                .clone(),
             metadata: SectionT::metadata().clone(),
             config_schema: schema_generator.subschema_for::<()>(),
             create_section_impl: RefCell::new(Box::new(move |builder, config| {
                 let section = self(builder, serde_json::from_value::<Config>(config).unwrap());
                 Box::new(section)
             })),
+            description: options.description.clone(),
+            example_configs: options.example_configs.clone(),
         }
     }
 }
@@ -1461,12 +1473,8 @@ impl DiagramElementRegistry {
         SectionBuilder: IntoSectionRegistration<SectionT, Config>,
         SectionT: Section,
     {
-        let reg = section_builder.into_section_registration(
-            options
-                .default_display_text
-                .unwrap_or_else(|| options.id.clone()),
-            &mut self.messages.schema_generator,
-        );
+        let reg = section_builder
+            .into_section_registration(&options, &mut self.messages.schema_generator);
         self.sections.insert(options.id, reg);
         SectionT::on_register(self);
     }
@@ -1587,6 +1595,7 @@ impl DiagramElementRegistry {
     }
 }
 
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
     /// The unique identifier for this node builder. Diagrams will use this ID
@@ -1595,6 +1604,37 @@ pub struct NodeBuilderOptions {
     /// If this is not specified, the id field will be used as the default
     /// display text.
     pub default_display_text: Option<BuilderId>,
+    /// Optional text to describe the builder.
+    pub description: Option<String>,
+    /// Examples of configurations that can be used with this node builder.
+    pub examples_configs: Vec<ConfigExample>,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+pub struct ConfigExample {
+    /// A description of what this config is for
+    pub description: String,
+    /// The value of the config
+    pub config: JsonMessage,
+}
+
+impl ConfigExample {
+    /// Create a new config example.
+    ///
+    /// Note that this function will panic if the `config` argument fails to be
+    /// serialized into a [`JsonMessage`], which happens if the data structure
+    /// contains a map with non-string keys or its [`Serialize`] implementation
+    /// produces an error. It's recommended to only use this during application
+    /// startup to avoid runtime failures.
+    ///
+    /// To construct a [`ConfigExample`] with no risk of panicking, you can
+    /// directly use normal structure initialization.
+    pub fn new(description: impl ToString, config: impl Serialize) -> Self {
+        Self {
+            description: description.to_string(),
+            config: serde_json::to_value(config).expect("failed to serialize example config"),
+        }
+    }
 }
 
 impl NodeBuilderOptions {
@@ -1602,11 +1642,26 @@ impl NodeBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
+            description: None,
+            examples_configs: Default::default(),
         }
     }
 
     pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
         self.default_display_text = Some(text.into());
+        self
+    }
+
+    pub fn with_description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    pub fn with_examples_configs(
+        mut self,
+        example_configs: impl IntoIterator<Item = ConfigExample>,
+    ) -> Self {
+        self.examples_configs = example_configs.into_iter().collect();
         self
     }
 }
@@ -1619,6 +1674,10 @@ pub struct SectionBuilderOptions {
     /// If this is not specified, the id field will be used as the default
     /// display text.
     pub default_display_text: Option<BuilderId>,
+    /// Optional text to describe the builder.
+    pub description: Option<String>,
+    /// Examples of configurations that can be used with this section builder.
+    pub example_configs: Vec<ConfigExample>,
 }
 
 impl SectionBuilderOptions {
@@ -1626,11 +1685,26 @@ impl SectionBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
+            description: None,
+            example_configs: Default::default(),
         }
     }
 
     pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
         self.default_display_text = Some(text.into());
+        self
+    }
+
+    pub fn with_description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    pub fn with_example_configs(
+        mut self,
+        example_configs: impl IntoIterator<Item = ConfigExample>,
+    ) -> Self {
+        self.example_configs = example_configs.into_iter().collect();
         self
     }
 }
