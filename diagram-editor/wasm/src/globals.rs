@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use bevy_impulse::DiagramElementRegistry;
 
 pub use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
-use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorState};
+use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app_wasm, ExecutorState};
 
 static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
 static BEVY_APP: Mutex<Option<bevy_app::SubApp>> = Mutex::new(None);
@@ -22,7 +22,7 @@ pub fn setup_wasm(
     }: InitOptions,
 ) {
     let mut executor_state = EXECUTOR_STATE.lock().unwrap();
-    *executor_state = Some(setup_bevy_app(&mut app, registry, &executor_options));
+    *executor_state = Some(setup_bevy_app_wasm(&mut app, registry, &executor_options));
     BEVY_APP.lock().unwrap().replace(app);
 }
 

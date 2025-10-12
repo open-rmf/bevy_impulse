@@ -381,6 +381,8 @@ impl Default for ExecutorOptions {
     }
 }
 
+/// Use this to set up a full-fledged bevy App to be used as a diagram execution server.
+/// Pass in just the main subapp using `&mut app.sub_apps_mut().main`.
 pub fn setup_bevy_app(
     app: &mut bevy_app::SubApp,
     registry: DiagramElementRegistry,
@@ -400,6 +402,42 @@ pub fn setup_bevy_app(
         despawn_chan: despawn_tx,
         response_timeout: options.response_timeout,
     }
+}
+
+/// Use this for WASM builds to set up a SubApp that does not belong to any App.
+/// WASM builds need to use just a plain SubApp because the full-fledged App
+/// struct no longer implements Send as of Bevy 0.16.
+pub fn setup_bevy_app_wasm(
+    app: &mut bevy_app::SubApp,
+    registry: DiagramElementRegistry,
+    options: &ExecutorOptions,
+) -> ExecutorState {
+    setup_subapp_defaults(app);
+    setup_bevy_app(app, registry, options)
+}
+
+/// We need to manually setup the SubApp the way it would be setup by a regular
+/// App, because we no longer get the benefit of a regular App in this highly
+/// async environment.
+///
+/// This function definition is based on [`bevy_app::App::default()`]
+fn setup_subapp_defaults(app: &mut bevy_app::SubApp) {
+    use bevy_ecs::schedule::ScheduleLabel;
+    app.update_schedule = Some(bevy_app::Main.intern());
+
+    app.init_resource::<bevy_ecs::reflect::AppTypeRegistry>();
+    app.register_type::<bevy_ecs::name::Name>();
+    app.register_type::<bevy_ecs::hierarchy::ChildOf>();
+    app.register_type::<bevy_ecs::hierarchy::Children>();
+
+    app.add_plugins(bevy_app::MainSchedulePlugin);
+    app.add_systems(
+        bevy_app::First,
+        bevy_ecs::event::event_update_system
+            .in_set(bevy_ecs::event::EventUpdates)
+            .run_if(bevy_ecs::event::event_update_condition),
+    );
+    app.add_event::<bevy_app::AppExit>();
 }
 
 #[cfg(feature = "router")]
