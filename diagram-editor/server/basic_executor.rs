@@ -33,9 +33,9 @@ pub mod prelude {
 
 #[derive(Parser, Debug)]
 #[clap(
-    name = "calculator",
+    name = "Basic Diagram Editor / Workflow Executor",
     version = "0.1.0",
-    about = "Example calculator app using diagrams."
+    about = "Basic program for running workflow diagrams headlessly (run) or serving a web-based diagram editor (serve)."
 )]
 pub struct Args {
     #[clap(subcommand)]
