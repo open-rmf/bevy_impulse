@@ -468,3 +468,87 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         )
         .with_fork_result();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_impulse::prelude::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_split() {
+        let diagram = Diagram::from_json(json!(
+            {
+                "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+                "version": "0.1.0",
+                "templates": {},
+                "start": "62746cc5-19e4-456f-a94f-d49619ccd2c0",
+                "ops": {
+                    "1283dab4-aec4-41d9-8dd3-ee04b2dc4c2b": {
+                        "type": "node",
+                        "builder": "mul",
+                        "next": "49939e88-eefb-4dcc-8185-c880abe43cc6",
+                        "config": 10
+                    },
+                    "2115dca9-fa22-406a-b4d1-6755732f9e4d": {
+                        "type": "node",
+                        "builder": "mul",
+                        "next": "aa4fdf7b-a554-4683-82de-0bfbf3752d1d",
+                        "config": 100
+                    },
+                    "62746cc5-19e4-456f-a94f-d49619ccd2c0": {
+                        "type": "split",
+                        "sequential": [
+                            "1283dab4-aec4-41d9-8dd3-ee04b2dc4c2b",
+                            "2115dca9-fa22-406a-b4d1-6755732f9e4d"
+                        ]
+                    },
+                    "49939e88-eefb-4dcc-8185-c880abe43cc6": {
+                        "type": "buffer"
+                    },
+                    "aa4fdf7b-a554-4683-82de-0bfbf3752d1d": {
+                        "type": "buffer"
+                    },
+                    "f26502a3-84ec-4c4d-9367-15c099248640": {
+                        "type": "node",
+                        "builder": "add",
+                        "next": {
+                            "builtin": "terminate"
+                        }
+                    },
+                    "c3f84b5f-5f09-4dc7-b937-bd1cdf504bf9": {
+                        "type": "join",
+                        "buffers": [
+                            "49939e88-eefb-4dcc-8185-c880abe43cc6",
+                            "aa4fdf7b-a554-4683-82de-0bfbf3752d1d"
+                        ],
+                        "next": "f26502a3-84ec-4c4d-9367-15c099248640"
+                    }
+                }
+            }
+        ))
+        .unwrap();
+
+        let request = json!([1, 2]);
+
+        let mut app = bevy_app::App::new();
+        app.add_plugins(ImpulseAppPlugin::default());
+        let mut registry = DiagramElementRegistry::new();
+        register(&mut registry);
+
+        let mut promise = app
+            .world
+            .command(|cmds| -> Result<Promise<JsonMessage>, DiagramError> {
+                let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
+                Ok(cmds.request(request, workflow).take_response())
+            })
+            .unwrap();
+
+        while promise.peek().is_pending() {
+            app.update();
+        }
+
+        let result = promise.take().available().unwrap().as_f64().unwrap();
+        assert_eq!(result, 210.0);
+    }
+}
