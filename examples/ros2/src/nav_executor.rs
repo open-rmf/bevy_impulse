@@ -17,12 +17,12 @@
 
 use ros2_workflow_examples::register_nav_catalog;
 
-use rclrs::*;
-use bevy_impulse::prelude::*;
-use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use bevy_app::ScheduleRunnerPlugin;
 use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
+use bevy_impulse::prelude::*;
+use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
+use rclrs::*;
 use std::{error::Error, fs::File};
 
 #[derive(Parser, Debug)]
@@ -71,7 +71,9 @@ fn run(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Er
 
     let mut promise = app.world.command(|commands| {
         // Generate the workflow from the diagram.
-        let workflow = diagram.spawn_io_workflow::<_, String>(commands, &registry).unwrap();
+        let workflow = diagram
+            .spawn_io_workflow::<_, String>(commands, &registry)
+            .unwrap();
 
         // Get the workflow running.
         commands.request((), workflow).take_response()

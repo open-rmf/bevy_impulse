@@ -109,7 +109,7 @@ pub fn zenoh_subscription_node<T: 'static + Send + Sync + Message + Default>(
     builder.create_node(callback.as_callback())
 }
 
-pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message>(
+pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message + std::fmt::Debug>(
     topic_name: Arc<str>,
     builder: &mut Builder,
 ) -> Node<T, Result<(), ArcError>> {

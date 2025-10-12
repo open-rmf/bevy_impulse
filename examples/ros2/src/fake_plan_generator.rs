@@ -15,11 +15,11 @@
  *
 */
 
-use rclrs::*;
-use nav_msgs::srv::{GetPlan, GetPlan_Request, GetPlan_Response};
-use geometry_msgs::msg::{Pose, PoseStamped, Point, Quaternion};
-use std_msgs::msg::Header;
 use builtin_interfaces::msg::Time as TimeMsg;
+use geometry_msgs::msg::{Point, Pose, PoseStamped, Quaternion};
+use nav_msgs::srv::{GetPlan, GetPlan_Request, GetPlan_Response};
+use rclrs::*;
+use std_msgs::msg::Header;
 
 fn main() {
     let context = Context::default_from_env().unwrap();
@@ -27,9 +27,8 @@ fn main() {
 
     let node = executor.create_node("fake_plan_generator").unwrap();
     let logger = node.logger().clone();
-    let _service = node.create_service::<GetPlan, _>(
-        "get_plan",
-        move |request: GetPlan_Request| {
+    let _service =
+        node.create_service::<GetPlan, _>("get_plan", move |request: GetPlan_Request| {
             log!(
                 &logger,
                 "Serving a fake plan from:\n - {:?}\nto\n - {:?}",
@@ -41,9 +40,10 @@ fn main() {
             let mut response = GetPlan_Response::default();
             for i in 1..=num_points {
                 let s = i as f64 / num_points as f64;
-                response.plan.poses.push(
-                    interpolate_pose(s, &request.start, &request.goal)
-                );
+                response
+                    .plan
+                    .poses
+                    .push(interpolate_pose(s, &request.start, &request.goal));
             }
 
             response
@@ -53,25 +53,21 @@ fn main() {
     executor.spin(SpinOptions::default());
 }
 
-fn interpolate_pose(
-    s: f64,
-    start: &PoseStamped,
-    goal: &PoseStamped,
-) -> PoseStamped {
+fn interpolate_pose(s: f64, start: &PoseStamped, goal: &PoseStamped) -> PoseStamped {
     PoseStamped {
         header: interpolate_header(s, &start.header, &goal.header),
         pose: Pose {
             position: interpolate_point(s, &start.pose.position, &goal.pose.position),
-            orientation: interpolate_orientation(s, &start.pose.orientation, &goal.pose.orientation),
-        }
+            orientation: interpolate_orientation(
+                s,
+                &start.pose.orientation,
+                &goal.pose.orientation,
+            ),
+        },
     }
 }
 
-fn interpolate_header(
-    s: f64,
-    start: &Header,
-    goal: &Header,
-) -> Header {
+fn interpolate_header(s: f64, start: &Header, goal: &Header) -> Header {
     let t_start = secs_from_msg(&start.stamp);
     let t_goal = secs_from_msg(&goal.stamp);
     let t = s * (t_goal as f64 - t_start as f64) + t_start as f64;
@@ -93,11 +89,7 @@ fn msg_from_secs(t: i64) -> TimeMsg {
     TimeMsg { sec, nanosec }
 }
 
-fn interpolate_point(
-    s: f64,
-    start: &Point,
-    goal: &Point,
-) -> Point {
+fn interpolate_point(s: f64, start: &Point, goal: &Point) -> Point {
     Point {
         x: s * (goal.x - start.x) + start.x,
         y: s * (goal.y - start.y) + start.y,
@@ -105,17 +97,13 @@ fn interpolate_point(
     }
 }
 
-fn interpolate_orientation(
-    s: f64,
-    start: &Quaternion,
-    goal: &Quaternion,
-) -> Quaternion {
+fn interpolate_orientation(s: f64, start: &Quaternion, goal: &Quaternion) -> Quaternion {
     // Just do a rough slerp approximation. This is a fake planner so
     // we don't need to do anything serious here.
     Quaternion {
-        x: (1.0-s)*start.x + s * goal.x,
-        y: (1.0-s)*start.y + s * goal.y,
-        z: (1.0-s)*start.z + s * goal.z,
-        w: (1.0-s)*start.w + s * goal.w,
+        x: (1.0 - s) * start.x + s * goal.x,
+        y: (1.0 - s) * start.y + s * goal.y,
+        z: (1.0 - s) * start.z + s * goal.z,
+        w: (1.0 - s) * start.w + s * goal.w,
     }
 }

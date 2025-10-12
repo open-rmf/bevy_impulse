@@ -217,6 +217,11 @@ impl From<JsonBufferKey> for AnyBufferKey {
 /// Similar to [`BufferView`][crate::BufferView], but this can be unlocked with
 /// a [`JsonBufferKey`], so it can work for any buffer whose message types
 /// support serialization and deserialization.
+///
+/// Obtain this from a [`World`] using the [`JsonBufferWorldAccess`] trait. Full
+/// world access is needed to get this, because the underlaying buffer may be any
+/// serializable data type, and only the [`JsonBufferKey`] will know the actual
+/// data type.
 pub struct JsonBufferView<'a> {
     storage: Box<dyn JsonBufferViewing + 'a>,
     gate: &'a GateState,
@@ -251,7 +256,10 @@ impl<'a> JsonBufferView<'a> {
 
     /// Iterate through the current elements of the buffer.
     pub fn iter(&self) -> IterJsonBufferView<'a, '_> {
-        IterJsonBufferView { index: 0, view: self }
+        IterJsonBufferView {
+            index: 0,
+            view: self,
+        }
     }
 
     /// Check whether the gate of this buffer is open or closed.
@@ -281,6 +289,11 @@ impl<'a, 'b> Iterator for IterJsonBufferView<'a, 'b> {
 /// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with a
 /// [`JsonBufferKey`], so it can work for any buffer whose message types support
 /// serialization and deserialization.
+///
+/// Obtain this from a [`World`] using the [`JsonBufferWorldAccess`] trait. Full
+/// world access is needed to get this, because the underlaying buffer may be any
+/// serializable data type, and only the [`JsonBufferKey`] will know the actual
+/// data type.
 pub struct JsonBufferMut<'w, 's, 'a> {
     storage: Box<dyn JsonBufferManagement + 'a>,
     buffer: Entity,

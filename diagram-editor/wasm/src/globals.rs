@@ -26,12 +26,6 @@ pub fn setup_wasm(
     BEVY_APP.lock().unwrap().replace(app);
 }
 
-pub(super) fn with_bevy_app<R>(f: impl FnOnce(&mut bevy_app::App) -> R) -> R {
-    let mut mg = BEVY_APP.lock().unwrap();
-    let app = mg.as_mut().expect("`init_wasm` not called");
-    f(app)
-}
-
 pub(super) async fn with_bevy_app_async<R>(f: impl AsyncFnOnce(&mut bevy_app::App) -> R) -> R {
     let mut mg = BEVY_APP.lock().unwrap();
     let app = mg.as_mut().expect("`init_wasm` not called");

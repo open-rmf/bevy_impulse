@@ -15,21 +15,21 @@
  *
 */
 
-use crate::{Builder, Node, StreamPack, AsyncMap, NeverFinish};
-use rclrs::{
-    Node as Ros2Node, IntoPrimitiveOptions, SubscriptionOptions, PublisherOptions,
-    GoalEvent, GoalStatus, GoalStatusCode, CancelResponse,
-    RclrsError, MessageIDL, ClientOptions, ActionClientOptions, ServiceIDL, ActionIDL,
+use crate::{AsyncMap, Builder, NeverFinish, Node, StreamPack};
+use futures::{
+    future::{select, Either},
+    StreamExt,
 };
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use futures_lite::future::race;
-use futures::{StreamExt, future::{select, Either}};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use std::{
-    pin::pin,
-    sync::Arc,
+use rclrs::{
+    ActionClientOptions, ActionIDL, CancelResponse, ClientOptions, GoalEvent, GoalStatus,
+    GoalStatusCode, IntoPrimitiveOptions, MessageIDL, Node as Ros2Node, PublisherOptions,
+    RclrsError, ServiceIDL, SubscriptionOptions,
 };
 use schemars::JsonSchema;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{pin::pin, sync::Arc};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 #[derive(StreamPack)]
 pub struct SubscriptionStreams<T: 'static + Send + Sync, CancelSignal: 'static + Send + Sync> {
@@ -116,47 +116,48 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         options: impl Into<SubscriptionOptions<'o>>,
     ) -> Node<(), Result<CancelSignal, String>, SubscriptionStreams<T, CancelSignal>>
     where
-        CancelSignal: 'static + Send + Sync
+        CancelSignal: 'static + Send + Sync,
     {
         let SubscriptionOptions { topic, qos, .. } = options.into();
         let topic: Arc<str> = topic.into();
-        self.create_map(move |input: AsyncMap<(), SubscriptionStreams<T, CancelSignal>>| {
-            let topic = topic.clone();
-            let qos = qos.clone();
-            let ros2_node = ros2_node.clone();
-            let (cancel_sender, mut cancel_receiver) = unbounded_channel();
-            input.streams.canceller.send(cancel_sender);
+        self.create_map(
+            move |input: AsyncMap<(), SubscriptionStreams<T, CancelSignal>>| {
+                let topic = topic.clone();
+                let qos = qos.clone();
+                let ros2_node = ros2_node.clone();
+                let (cancel_sender, mut cancel_receiver) = unbounded_channel();
+                input.streams.canceller.send(cancel_sender);
 
-            let subscribing = async move {
-                let mut receiver = ros2_node.create_subscription_receiver::<T>(
-                    (&topic).qos(qos)
-                )
-                .map_err(|err| err.to_string())?;
+                let subscribing = async move {
+                    let mut receiver = ros2_node
+                        .create_subscription_receiver::<T>((&topic).qos(qos))
+                        .map_err(|err| err.to_string())?;
 
-                while let Some(msg) = receiver.recv().await {
-                    input.streams.out.send(msg);
-                }
+                    while let Some(msg) = receiver.recv().await {
+                        input.streams.out.send(msg);
+                    }
 
-                unreachable!(
-                    "The channel of a SubscriptionReceiver can never close \
+                    unreachable!(
+                        "The channel of a SubscriptionReceiver can never close \
                     because it keeps ownership of both the sender and receiver."
-                );
-            };
-
-            let cancellation = async move {
-                let Some(msg) = cancel_receiver.recv().await else {
-                    // The canceller was dropped, meaning the user will never
-                    // cancel this node, so it should just keep running forever
-                    // (it will be forcibly stopped during the workflow cleanup)
-                    NeverFinish.await;
-                    unreachable!("this future will never finish");
+                    );
                 };
 
-                Ok(msg)
-            };
+                let cancellation = async move {
+                    let Some(msg) = cancel_receiver.recv().await else {
+                        // The canceller was dropped, meaning the user will never
+                        // cancel this node, so it should just keep running forever
+                        // (it will be forcibly stopped during the workflow cleanup)
+                        NeverFinish.await;
+                        unreachable!("this future will never finish");
+                    };
 
-            race(subscribing, cancellation)
-        })
+                    Ok(msg)
+                };
+
+                race(subscribing, cancellation)
+            },
+        )
     }
 
     fn create_ros2_publisher<'o, T: MessageIDL>(
@@ -166,9 +167,7 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
     ) -> Result<Node<T, Result<(), String>>, RclrsError> {
         let publisher = ros2_node.create_publisher(options)?;
         let node = self.create_map_block(move |message: T| {
-            publisher
-                .publish(message)
-                .map_err(|err| err.to_string())
+            publisher.publish(message).map_err(|err| err.to_string())
         });
         Ok(node)
     }
@@ -182,44 +181,49 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         CancelSignal: 'static + Send + Sync,
     {
         let client = ros2_node.create_client::<S>(options)?;
-        let node = self.create_map(move |input: AsyncMap<S::Request, ServiceClientStreams<CancelSignal>>| {
-            let AsyncMap { request, streams, .. } = input;
-            let client = Arc::clone(&client);
-            let (cancel_sender, mut cancel_receiver) = unbounded_channel();
-            streams.canceller.send(cancel_sender);
+        let node = self.create_map(
+            move |input: AsyncMap<S::Request, ServiceClientStreams<CancelSignal>>| {
+                let AsyncMap {
+                    request, streams, ..
+                } = input;
+                let client = Arc::clone(&client);
+                let (cancel_sender, mut cancel_receiver) = unbounded_channel();
+                streams.canceller.send(cancel_sender);
 
-            let receive = async move {
-                client.notify_on_service_ready()
-                    .await
-                    .map_err(|_| Err(String::from("failed to wait for action server")))?;
+                let receive = async move {
+                    client
+                        .notify_on_service_ready()
+                        .await
+                        .map_err(|_| Err(String::from("failed to wait for action server")))?;
 
-                let receiver = client.call(request);
-                let response: Result<S::Response, _> = match receiver {
-                    Ok(receiver) => receiver.await,
-                    Err(err) => return Err(Err(err.to_string())),
+                    let receiver = client.call(request);
+                    let response: Result<S::Response, _> = match receiver {
+                        Ok(receiver) => receiver.await,
+                        Err(err) => return Err(Err(err.to_string())),
+                    };
+
+                    let Ok(response) = response else {
+                        return Err(Err(String::from("response was cancelled by the executor")));
+                    };
+
+                    Ok(response)
                 };
 
-                let Ok(response) = response else {
-                    return Err(Err(String::from("response was cancelled by the executor")));
+                let cancellation = async move {
+                    let Some(msg) = cancel_receiver.recv().await else {
+                        // The canceller was dropped, meaning the user will never
+                        // cancel this node, so it should just keep running forever
+                        // (it will be forcibly stopped during the workflow cleanup)
+                        NeverFinish.await;
+                        unreachable!("this future will never finish");
+                    };
+
+                    Err(Ok(msg))
                 };
 
-                Ok(response)
-            };
-
-            let cancellation = async move {
-                let Some(msg) = cancel_receiver.recv().await else {
-                    // The canceller was dropped, meaning the user will never
-                    // cancel this node, so it should just keep running forever
-                    // (it will be forcibly stopped during the workflow cleanup)
-                    NeverFinish.await;
-                    unreachable!("this future will never finish");
-                };
-
-                Err(Ok(msg))
-            };
-
-            race(receive, cancellation)
-        });
+                race(receive, cancellation)
+            },
+        );
 
         Ok(node)
     }
@@ -234,71 +238,77 @@ impl<'w, 's, 'a> BuildRos2 for Builder<'w, 's, 'a> {
         A::Result: Serialize + DeserializeOwned + JsonSchema,
     {
         let client = ros2_node.create_action_client::<A>(options)?;
-        let node = self.create_map(move |input: AsyncMap<A::Goal, ActionClientStreams<A, CancelSignal>>| {
-            let AsyncMap { request, streams, .. } = input;
-            let client = Arc::clone(&client);
-            let (cancel_sender, mut cancel_receiver) = unbounded_channel();
-            streams.canceller.send(cancel_sender);
+        let node = self.create_map(
+            move |input: AsyncMap<A::Goal, ActionClientStreams<A, CancelSignal>>| {
+                let AsyncMap {
+                    request, streams, ..
+                } = input;
+                let client = Arc::clone(&client);
+                let (cancel_sender, mut cancel_receiver) = unbounded_channel();
+                streams.canceller.send(cancel_sender);
 
-            async move {
-                client.notify_on_action_ready()
-                    .await
-                    .map_err(|_| Err(String::from("failed to wait for action server")))?;
+                async move {
+                    client
+                        .notify_on_action_ready()
+                        .await
+                        .map_err(|_| Err(String::from("failed to wait for action server")))?;
 
-                let goal_requested = client.request_goal(request);
-                let Some(goal_client) = goal_requested.await else {
-                    return Err(Err(String::from("goal was rejected")));
-                };
+                    let goal_requested = client.request_goal(request);
+                    let Some(goal_client) = goal_requested.await else {
+                        return Err(Err(String::from("goal was rejected")));
+                    };
 
-                let canceller = goal_client.cancellation.clone();
-                let mut goal_client_stream = goal_client.stream();
+                    let canceller = goal_client.cancellation.clone();
+                    let mut goal_client_stream = goal_client.stream();
 
-                let receiving = async move {
-                    while let Some(event) = goal_client_stream.next().await {
-                        match event {
-                            GoalEvent::Feedback(feedback) => {
-                                streams.feedback.send(feedback);
-                            }
-                            GoalEvent::Status(status) => {
-                                streams.status.send(status);
-                            }
-                            GoalEvent::Result((status, result)) => {
-                                return Ok(ActionResult { status, result });
+                    let receiving = async move {
+                        while let Some(event) = goal_client_stream.next().await {
+                            match event {
+                                GoalEvent::Feedback(feedback) => {
+                                    streams.feedback.send(feedback);
+                                }
+                                GoalEvent::Status(status) => {
+                                    streams.status.send(status);
+                                }
+                                GoalEvent::Result((status, result)) => {
+                                    return Ok(ActionResult { status, result });
+                                }
                             }
                         }
-                    }
 
-                    Err(Err(String::from("goal stream closed without receiving result")))
-                };
+                        Err(Err(String::from(
+                            "goal stream closed without receiving result",
+                        )))
+                    };
 
-                let cancellation = async move {
-                    loop {
-                        let Some(signal) = cancel_receiver.recv().await else {
-                            // The canceller was dropped, meaning the user will never
-                            // cancel this node, so it should just keep running forever
-                            // (it will be forcibly stopped during the node cleanup)
-                            NeverFinish.await;
-                            unreachable!("this future will never finish");
-                        };
+                    let cancellation = async move {
+                        loop {
+                            let Some(signal) = cancel_receiver.recv().await else {
+                                // The canceller was dropped, meaning the user will never
+                                // cancel this node, so it should just keep running forever
+                                // (it will be forcibly stopped during the node cleanup)
+                                NeverFinish.await;
+                                unreachable!("this future will never finish");
+                            };
 
-                        let response = canceller.cancel().await;
-                        streams.cancellation_response.send(ActionCancellation {
-                            signal,
-                            response,
-                        });
-                    }
-                };
+                            let response = canceller.cancel().await;
+                            streams
+                                .cancellation_response
+                                .send(ActionCancellation { signal, response });
+                        }
+                    };
 
-                match select(pin!(receiving), pin!(cancellation)).await {
-                    Either::Left((received, _)) => {
-                        return received;
-                    }
-                    Either::Right(_) => {
-                        unreachable!("the cancellation future will never finish");
+                    match select(pin!(receiving), pin!(cancellation)).await {
+                        Either::Left((received, _)) => {
+                            return received;
+                        }
+                        Either::Right(_) => {
+                            unreachable!("the cancellation future will never finish");
+                        }
                     }
                 }
-            }
-        });
+            },
+        );
 
         Ok(node)
     }

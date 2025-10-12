@@ -18,9 +18,8 @@
 use super::*;
 use crate::BuildRos2;
 use rclrs::{
-    Node as Ros2Node, MessageIDL, ServiceIDL, ActionIDL, ActionClientOptions,
-    PrimitiveOptions, QosOptions,
-    GoalStatus, GoalStatusCode,
+    ActionClientOptions, ActionIDL, GoalStatus, GoalStatusCode, MessageIDL, Node as Ros2Node,
+    PrimitiveOptions, QosOptions, ServiceIDL,
 };
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::UnboundedSender;
@@ -37,7 +36,10 @@ impl DiagramElementRegistry {
     /// `{node_name}_{type_name}_{subscription|publisher|service_client|action_client}`
     #[must_use = "no node builders will be created unless you register the specific messages, services, or actions that you need"]
     pub fn enable_ros2(&mut self, ros2_node: Ros2Node) -> Ros2Registry<'_> {
-        Ros2Registry { ros2_node, registry: self }
+        Ros2Registry {
+            ros2_node,
+            registry: self,
+        }
     }
 }
 
@@ -52,19 +54,24 @@ pub struct Ros2Registry<'a> {
 impl<'a> Ros2Registry<'a> {
     /// Register a message definition to obtain node builders for publishers and
     /// subscriptions for this message type.
-    pub fn register_ros2_message<T: MessageIDL + Serialize + DeserializeOwned + JsonSchema>(&mut self) -> &'_ mut Self {
+    pub fn register_ros2_message<T: MessageIDL + Serialize + DeserializeOwned + JsonSchema>(
+        &mut self,
+    ) -> &'_ mut Self {
         let node_name_snake = self.ros2_node.name().replace("/", "_");
         let message_name_minimal = T::TYPE_NAME.split("/").last().unwrap_or("<unnamed>");
         let message_name_snake = T::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
-        self.registry.register_node_builder(
-            NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__subscription"))
-            .with_default_display_text(format!("{message_name_minimal} Subscription")),
-            move |builder, config: PrimitiveOptions| {
-                builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), config)
-            }
-        )
+        self.registry
+            .register_node_builder(
+                NodeBuilderOptions::new(format!(
+                    "{node_name_snake}__{message_name_snake}__subscription"
+                ))
+                .with_default_display_text(format!("{message_name_minimal} Subscription")),
+                move |builder, config: PrimitiveOptions| {
+                    builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), config)
+                },
+            )
             .with_fork_result();
 
         // For cancel sender
@@ -75,14 +82,17 @@ impl<'a> Ros2Registry<'a> {
             .register_message::<UnboundedSender<JsonMessage>>();
 
         let ros2_node = self.ros2_node.clone();
-        self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name_snake}__{message_name_snake}__publisher"))
-            .with_default_display_text(format!("{message_name_minimal} Publisher", )),
-            move |builder, config: PrimitiveOptions| {
-                let node = builder.create_ros2_publisher::<T>(ros2_node.clone(), config)?;
-                Ok(node)
-            }
-        )
+        self.registry
+            .register_node_builder_fallible(
+                NodeBuilderOptions::new(format!(
+                    "{node_name_snake}__{message_name_snake}__publisher"
+                ))
+                .with_default_display_text(format!("{message_name_minimal} Publisher",)),
+                move |builder, config: PrimitiveOptions| {
+                    let node = builder.create_ros2_publisher::<T>(ros2_node.clone(), config)?;
+                    Ok(node)
+                },
+            )
             .with_fork_result();
 
         self
@@ -100,14 +110,16 @@ impl<'a> Ros2Registry<'a> {
         let service_name_snake = S::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
-        self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name_snake}__{service_name_snake}__client"))
-            .with_default_display_text(format!("{service_name_minimal} Client")),
-            move |builder, config: PrimitiveOptions| {
-                let node = builder.create_ros2_service_client::<S, JsonMessage>(ros2_node.clone(), config)?;
-                Ok(node)
-            }
-        )
+        self.registry
+            .register_node_builder_fallible(
+                NodeBuilderOptions::new(format!("{node_name_snake}__{service_name_snake}__client"))
+                    .with_default_display_text(format!("{service_name_minimal} Client")),
+                move |builder, config: PrimitiveOptions| {
+                    let node = builder
+                        .create_ros2_service_client::<S, JsonMessage>(ros2_node.clone(), config)?;
+                    Ok(node)
+                },
+            )
             .with_fork_result();
 
         self.registry
@@ -137,14 +149,16 @@ impl<'a> Ros2Registry<'a> {
         let action_name_snake = A::TYPE_NAME.replace("/", "_");
 
         let ros2_node = self.ros2_node.clone();
-        self.registry.register_node_builder_fallible(
-            NodeBuilderOptions::new(format!("{node_name_snake}__{action_name_snake}__client"))
-            .with_default_display_text(format!("{action_name_minimal} Client")),
-            move |builder, config: ActionClientConfig| {
-                let node = builder.create_ros2_action_client::<A, JsonMessage>(ros2_node.clone(), &config)?;
-                Ok(node)
-            }
-        )
+        self.registry
+            .register_node_builder_fallible(
+                NodeBuilderOptions::new(format!("{node_name_snake}__{action_name_snake}__client"))
+                    .with_default_display_text(format!("{action_name_minimal} Client")),
+                move |builder, config: ActionClientConfig| {
+                    let node = builder
+                        .create_ros2_action_client::<A, JsonMessage>(ros2_node.clone(), &config)?;
+                    Ok(node)
+                },
+            )
             .with_fork_result();
 
         self.registry
@@ -161,7 +175,6 @@ impl<'a> Ros2Registry<'a> {
             .no_serializing()
             .no_deserializing()
             .register_message::<UnboundedSender<JsonMessage>>();
-
 
         self
     }
@@ -186,11 +199,21 @@ pub struct ActionClientConfig {
 impl<'a> From<&'a ActionClientConfig> for ActionClientOptions<'a> {
     fn from(value: &'a ActionClientConfig) -> Self {
         let mut options = ActionClientOptions::new(&value.action);
-        value.goal_service_qos.apply_to(&mut options.goal_service_qos);
-        value.result_service_qos.apply_to(&mut options.result_service_qos);
-        value.cancel_service_qos.apply_to(&mut options.cancel_service_qos);
-        value.feedback_topic_qos.apply_to(&mut options.feedback_topic_qos);
-        value.status_topic_qos.apply_to(&mut options.status_topic_qos);
+        value
+            .goal_service_qos
+            .apply_to(&mut options.goal_service_qos);
+        value
+            .result_service_qos
+            .apply_to(&mut options.result_service_qos);
+        value
+            .cancel_service_qos
+            .apply_to(&mut options.cancel_service_qos);
+        value
+            .feedback_topic_qos
+            .apply_to(&mut options.feedback_topic_qos);
+        value
+            .status_topic_qos
+            .apply_to(&mut options.status_topic_qos);
         options
     }
 }
