@@ -5,11 +5,11 @@ edition = "2021"
 description = "catalog of reusable calculator operations"
 
 [dependencies]
-bevy_app = "0.12"
-bevy_core = "0.12"
+bevy_app = { workspace = true }
+bevy_core = { workspace = true }
 bevy_impulse = { version = "0.0.2", path = "../../..", features = ["diagram"] }
-bevy_time = "0.12"
+bevy_time = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
-tracing-subscriber = "0.3.19"
+tracing-subscriber = { workspace = true }
