@@ -74,7 +74,7 @@ pub fn headless(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), B
 
     let request = serde_json::Value::from_str(args.request.as_ref().map(|s| s.as_str()).unwrap_or("null"))?;
     let mut promise =
-        app.world
+        app.world_mut()
             .command(|cmds| -> Result<Promise<serde_json::Value>, DiagramError> {
                 let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
                 Ok(cmds.request(request, workflow).take_response())
@@ -94,10 +94,19 @@ pub async fn serve(
 ) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
-    let mut app = bevy_app::App::new();
-    app.add_plugins(ImpulseAppPlugin::default());
-    let router = new_router(&mut app, registry, ServerOptions::default());
-    thread::spawn(move || app.run());
+    let (router_sender, router_receiver) = tokio::sync::oneshot::channel();
+    thread::spawn(move || {
+        // The App needs to be created in the same thread that it gets run in,
+        // because App does not implement Send.
+        let mut app = bevy_app::App::new();
+        app.add_plugins(ImpulseAppPlugin::default());
+        let router = new_router(&mut app, registry, ServerOptions::default());
+        let _ = router_sender.send(router);
+        app.run()
+    });
+
+    let router = router_receiver.await?;
+
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await
         .unwrap();

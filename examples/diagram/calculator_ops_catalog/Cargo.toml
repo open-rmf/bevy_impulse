@@ -6,7 +6,6 @@ description = "catalog of reusable calculator operations"
 
 [dependencies]
 bevy_app = { workspace = true }
-bevy_core = { workspace = true }
 bevy_impulse = { version = "0.0.2", path = "../../..", features = ["diagram"] }
 bevy_time = { workspace = true }
 serde = { workspace = true }

@@ -16,10 +16,9 @@
 */
 
 use bevy_ecs::{
-    prelude::{Commands, Component, Entity, World},
+    prelude::{ChildOf, Commands, Component, Entity, World},
     system::Command,
 };
-use bevy_hierarchy::BuildChildren;
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
@@ -44,7 +43,7 @@ impl<S: StreamEffect> NamedStream<S> {
     ) -> (InputSlot<S::Input>, Output<S::Output>) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             Some(in_scope),
             source,
             RedirectScopeStream::<S>::new(target),
@@ -61,7 +60,7 @@ impl<S: StreamEffect> NamedStream<S> {
         builder: &mut Builder,
     ) -> InputSlot<S::Input> {
         let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             source,
             RedirectWorkflowStream::new(NamedStreamRedirect::<S>::static_name(name.into())),
@@ -91,10 +90,10 @@ impl<S: StreamEffect> NamedStream<S> {
         commands: &mut Commands,
     ) -> Receiver<S::Output> {
         let (sender, receiver) = unbounded_channel::<S::Output>();
-        let target = commands.spawn(()).set_parent(source).id();
+        let target = commands.spawn(()).insert(ChildOf(source)).id();
 
         map.add_named::<S::Output>(name.into(), target, commands);
-        commands.add(AddImpulse::new(None, target, TakenStream::new(sender)));
+        commands.queue(AddImpulse::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -107,8 +106,8 @@ impl<S: StreamEffect> NamedStream<S> {
         commands: &mut Commands,
     ) {
         let name = name.into();
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(
+        let redirect = commands.spawn(()).insert(ChildOf(source)).id();
+        commands.queue(AddImpulse::new(
             None,
             redirect,
             Push::<S::Output>::new(target, true).with_name(name.clone()),
@@ -203,7 +202,7 @@ impl<S: StreamEffect> NamedStream<S> {
             })
             .collect();
 
-        commands.add(SendNamedStreams::<
+        commands.queue(SendNamedStreams::<
             S,
             DefaultStreamBufferContainer<NamedValue<S::Input>>,
         >::new(container, source, session, buffer.targets));

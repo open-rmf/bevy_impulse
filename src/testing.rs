@@ -17,8 +17,8 @@
 
 pub use bevy_app::{App, Update};
 pub use bevy_ecs::{
-    prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource, World},
-    system::{CommandQueue, IntoSystem},
+    prelude::{Commands, Component, Entity, In, IntoSystem, Local, Query, ResMut, Resource, World},
+    world::CommandQueue,
 };
 use bevy_time::TimePlugin;
 
@@ -54,13 +54,19 @@ impl TestingContext {
 
     pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
         self.app
-            .world
-            .get_resource_or_insert_with(FlushParameters::default)
+            .world_mut()
+            .get_resource_or_insert_with(FlushParameters::avoid_hanging)
             .flush_loop_limit = limit;
     }
 
+    pub fn avoid_hanging_flush(&mut self) {
+        self.app
+            .world_mut()
+            .insert_resource(FlushParameters::avoid_hanging());
+    }
+
     pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
-        self.app.world.command(f)
+        self.app.world_mut().command(f)
     }
 
     /// Build a simple workflow with a single input and output, and no streams
@@ -92,7 +98,7 @@ impl TestingContext {
     }
 
     pub fn run(&mut self, conditions: impl Into<FlushConditions>) {
-        self.run_impl::<()>(None, conditions);
+        self.run_impl::<()>(None, conditions.into());
     }
 
     pub fn run_while_pending<T>(&mut self, promise: &mut Promise<T>) {
@@ -119,15 +125,13 @@ impl TestingContext {
             if let Some(timeout) = conditions.timeout {
                 let elapsed = std::time::Instant::now() - t_initial;
                 if timeout < elapsed {
-                    println!("Exceeded timeout of {timeout:?}: {elapsed:?}");
                     return false;
                 }
             }
 
+            count += 1;
             if let Some(count_limit) = conditions.update_count {
-                count += 1;
                 if count_limit < count {
-                    println!("Exceeded count limit of {count_limit}: {count}");
                     return false;
                 }
             }
@@ -139,7 +143,7 @@ impl TestingContext {
     }
 
     pub fn no_unhandled_errors(&self) -> bool {
-        let Some(errors) = self.app.world.get_resource::<UnhandledErrors>() else {
+        let Some(errors) = self.app.world().get_resource::<UnhandledErrors>() else {
             return true;
         };
 
@@ -147,20 +151,31 @@ impl TestingContext {
     }
 
     pub fn get_unhandled_errors(&self) -> Option<&UnhandledErrors> {
-        self.app.world.get_resource::<UnhandledErrors>()
+        self.app.world().get_resource::<UnhandledErrors>()
+    }
+
+    pub fn assert_no_errors(&self) {
+        assert!(
+            self.no_unhandled_errors(),
+            "{:#?}",
+            self.get_unhandled_errors(),
+        );
     }
 
     // Check that all buffers in the world are empty
     pub fn confirm_buffers_empty(&mut self) -> Result<(), Vec<Entity>> {
-        let mut query = self.app.world.query::<(Entity, &GetBufferedSessionsFn)>();
+        let mut query = self
+            .app
+            .world_mut()
+            .query::<(Entity, &GetBufferedSessionsFn)>();
         let buffers: Vec<_> = query
-            .iter(&self.app.world)
+            .iter(self.app.world())
             .map(|(e, get_sessions)| (e, get_sessions.0))
             .collect();
 
         let mut non_empty_buffers = Vec::new();
         for (e, get_sessions) in buffers {
-            if !get_sessions(e, &self.app.world).is_ok_and(|s| s.is_empty()) {
+            if !get_sessions(e, self.app.world()).is_ok_and(|s| s.is_empty()) {
                 non_empty_buffers.push(e);
             }
         }
@@ -266,7 +281,7 @@ impl TestingContext {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct FlushConditions {
     pub timeout: Option<std::time::Duration>,
     pub update_count: Option<usize>,

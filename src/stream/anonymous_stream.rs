@@ -16,10 +16,9 @@
 */
 
 use bevy_ecs::{
-    prelude::{Commands, Entity, World},
+    prelude::{ChildOf, Commands, Entity, World},
     system::Command,
 };
-use bevy_hierarchy::BuildChildren;
 
 use tokio::sync::mpsc::unbounded_channel;
 pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
@@ -68,7 +67,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
     ) -> (InputSlot<S::Input>, Output<S::Output>) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             Some(in_scope),
             source,
             RedirectScopeStream::<Self>::new(target),
@@ -82,7 +81,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
 
     fn spawn_workflow_streams(builder: &mut Builder) -> InputSlot<S::Input> {
         let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             source,
             RedirectWorkflowStream::new(AnonymousStreamRedirect::<S>::new(None)),
@@ -114,11 +113,11 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
             .spawn(())
             // Set the parent of this stream to be the impulse so it can be
             // recursively despawned together.
-            .set_parent(source)
+            .insert(ChildOf(source))
             .id();
 
         map.add_anonymous::<S::Output>(target, commands);
-        commands.add(AddImpulse::new(None, target, TakenStream::new(sender)));
+        commands.queue(AddImpulse::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -129,8 +128,8 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
         map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) {
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(
+        let redirect = commands.spawn(()).insert(ChildOf(source)).id();
+        commands.queue(AddImpulse::new(
             None,
             redirect,
             Push::<S::Output>::new(target, true),
@@ -196,7 +195,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
         session: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(SendAnonymousStreams::<
+        commands.queue(SendAnonymousStreams::<
             S,
             DefaultStreamBufferContainer<S::Input>,
         >::new(

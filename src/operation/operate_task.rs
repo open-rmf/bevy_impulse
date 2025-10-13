@@ -16,10 +16,9 @@
 */
 
 use bevy_ecs::{
-    prelude::{Component, Entity, Resource, World},
-    system::Command,
+    hierarchy::ChildOf,
+    prelude::{Command, Component, Entity, Resource, World},
 };
-use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
 
 use std::{future::Future, pin::Pin, sync::Arc, task::Context, task::Poll};
 
@@ -114,7 +113,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
         let source = self.source;
         let scope = world.get::<ScopeStorage>(self.node).map(|s| s.get());
         let mut source_mut = world.entity_mut(source);
-        source_mut.set_parent(self.node);
+        source_mut.insert(ChildOf(self.node));
         if let Some(scope) = scope {
             source_mut.insert(ScopeStorage::new(scope));
         }
@@ -188,7 +187,7 @@ where
                 JobWakerStorage(waker),
                 StopTask(stop_task::<Response, Streams>),
             ))
-            .set_parent(node);
+            .insert(ChildOf(node));
 
         let mut node_mut = world.get_entity_mut(node).or_broken()?;
         let mut tasks = node_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
@@ -251,6 +250,7 @@ where
                 let r = world
                     .entity_mut(target)
                     .defer_input(session, result, roster);
+
                 world
                     .get_mut::<OperateTask<Response, Streams>>(source)
                     .or_broken()?
@@ -382,7 +382,7 @@ fn cleanup_task(
         roster.unblock(unblock);
     }
 
-    if let Some(mut node_mut) = world.get_entity_mut(node) {
+    if let Ok(mut node_mut) = world.get_entity_mut(node) {
         if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
             let mut cleanup_ready = true;
             active_tasks.list.retain(
@@ -420,8 +420,8 @@ fn cleanup_task(
         };
     };
 
-    if let Some(source_mut) = world.get_entity_mut(source) {
-        source_mut.despawn_recursive();
+    if let Ok(source_mut) = world.get_entity_mut(source) {
+        source_mut.despawn();
     }
 
     roster.purge(source);

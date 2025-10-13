@@ -2,7 +2,8 @@ use bevy_impulse::{DiagramElementRegistry, ImpulseAppPlugin};
 use bevy_impulse_diagram_editor_wasm::{init_wasm, setup_wasm, ExecutorOptions, InitOptions};
 
 init_wasm! {
-    let mut app = bevy_app::App::new();
+    wasm_logger::init(wasm_logger::Config::default());
+    let mut app = bevy_app::SubApp::new();
     app.add_plugins(ImpulseAppPlugin::default());
 
     let mut registry = DiagramElementRegistry::new();

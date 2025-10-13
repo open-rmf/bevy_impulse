@@ -157,7 +157,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// Connect the output of one into the input slot of another node.
     pub fn connect<T: 'static + Send + Sync>(&mut self, output: Output<T>, input: InputSlot<T>) {
         assert_eq!(output.scope(), input.scope());
-        self.commands.add(Connect {
+        self.commands.queue(Connect {
             original_target: output.id(),
             new_target: input.id(),
         });
@@ -171,7 +171,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         settings: BufferSettings,
     ) -> Buffer<T> {
         let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateBuffer::<T>::new(settings),
@@ -234,7 +234,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: Clone + 'static + Send + Sync,
     {
         let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             ForkClone::<T>::new(ForkTargetStorage::new()),
@@ -270,7 +270,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_ok = self.commands.spawn(UnusedTarget).id();
         let target_err = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
@@ -299,7 +299,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_some = self.commands.spawn(UnusedTarget).id();
         let target_none = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
@@ -402,7 +402,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             Collect::<T, N>::new(target, min, max),
@@ -439,7 +439,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync + Splittable,
     {
         let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateSplit::<T>::default(),
@@ -462,7 +462,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync + ToString,
     {
         let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateCancel::<T>::new(),
@@ -478,7 +478,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// input value that triggered it, use [`Self::create_cancel`].
     pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
         let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateQuietCancel,
@@ -594,7 +594,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             Trim::<T>::new(branches, target),
@@ -625,7 +625,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateDynamicGate::<T, _>::new(buffers, target),
@@ -654,7 +654,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             OperateStaticGate::<T, _>::new(buffers, target, action),
@@ -768,7 +768,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let mut map = StreamTargetMap::default();
         let streams = Streams::spawn_node_streams(source, &mut map, self);
         self.commands.entity(source).insert(map);
-        self.commands.add(AddOperation::new(
+        self.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             Injection::<Request, Response, Streams>::new(target),

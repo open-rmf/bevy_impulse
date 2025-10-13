@@ -21,7 +21,11 @@ use crate::{
 };
 
 use bevy_app::prelude::App;
-use bevy_ecs::{schedule::SystemConfigs, system::EntityCommands, world::EntityWorldMut};
+use bevy_ecs::{
+    schedule::ScheduleConfigs,
+    system::{EntityCommands, ScheduleSystem},
+    world::EntityWorldMut,
+};
 
 pub trait ServiceTrait {
     // TODO(@mxgrey): Are we using these associated types anymore?
@@ -45,7 +49,8 @@ pub trait IntoContinuousService<M> {
     type Response;
     type Streams;
 
-    fn into_system_config(self, entity_mut: &mut EntityWorldMut) -> SystemConfigs;
+    fn into_system_config(self, entity_mut: &mut EntityWorldMut)
+        -> ScheduleConfigs<ScheduleSystem>;
 }
 
 /// This trait allows service systems to be converted into a builder that
@@ -117,5 +122,5 @@ pub trait AlsoAdd<Request, Response, Streams> {
 }
 
 pub trait ConfigureContinuousService {
-    fn apply(self, config: SystemConfigs) -> SystemConfigs;
+    fn apply(self, config: ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem>;
 }

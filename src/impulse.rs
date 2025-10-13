@@ -15,8 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::{Bundle, Commands, Component, Entity, Event};
-use bevy_hierarchy::BuildChildren;
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Bundle, Commands, Component, Entity, Event},
+};
 
 use std::future::Future;
 
@@ -79,7 +81,7 @@ where
     /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
     /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
-        self.commands.add(Detach {
+        self.commands.queue(Detach {
             target: self.target,
         });
         self
@@ -95,7 +97,7 @@ where
     #[must_use]
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
@@ -114,7 +116,7 @@ where
     /// Take only the response data that comes out of the request.
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
@@ -140,7 +142,7 @@ where
             .entity(source)
             .insert((Cancellable::new(cancel_impulse), ImpulseMarker))
             .remove::<UnusedTarget>()
-            .set_parent(target);
+            .insert(ChildOf(target));
         provider.connect(None, source, target, self.commands);
         Impulse {
             source,
@@ -218,7 +220,7 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             Store::<Response>::new(target),
@@ -259,7 +261,7 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn push(self, target: Entity) {
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             Push::<Response>::new(target, false),
@@ -293,7 +295,7 @@ where
     /// [`Self::store`] or [`Self::push`]. Alternatively you can transform it
     /// into a bundle using [`Self::map_block`] or [`Self::map_async`].
     pub fn insert(self, target: Entity) {
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             Insert::<Response>::new(target),
@@ -310,7 +312,7 @@ where
     ///
     /// Using this will also effectively [detach](Self::detach) the impulse.
     pub fn send_event(self) {
-        self.commands.add(AddImpulse::new(
+        self.commands.queue(AddImpulse::new(
             Some(self.source),
             self.target,
             SendEvent::<Response>::new(),
@@ -355,7 +357,7 @@ impl<T> Default for Collection<T> {
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*, ContinuousQueueView};
-    use bevy_utils::label::DynEq;
+    use bevy_ecs::label::DynEq;
     use smallvec::SmallVec;
     use std::{
         sync::{Arc, Mutex},

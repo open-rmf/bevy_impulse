@@ -150,6 +150,7 @@ pub use workflow::*;
 pub mod testing;
 
 pub(crate) mod utils;
+#[allow(unused)]
 pub(crate) use utils::*;
 
 #[cfg(feature = "trace")]
@@ -378,9 +379,8 @@ impl Plugin for ImpulseAppPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             ImpulsePlugin::default(),
-            bevy_core::TaskPoolPlugin::default(),
-            bevy_core::TypeRegistrationPlugin,
-            bevy_core::FrameCountPlugin,
+            bevy_app::TaskPoolPlugin::default(),
+            bevy_diagnostic::FrameCountPlugin,
             bevy_app::ScheduleRunnerPlugin::default(),
         ));
     }

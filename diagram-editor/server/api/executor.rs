@@ -11,7 +11,7 @@ use axum::{
 };
 #[cfg(feature = "router")]
 use axum::{routing::post, Router};
-use bevy_ecs::schedule::IntoSystemConfigs;
+use bevy_ecs::{prelude::Entity, schedule::IntoScheduleConfigs};
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +31,8 @@ use crate::api::error_responses::WorkflowCancelledResponse;
 #[cfg(feature = "debug")]
 type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
 
-type WorkflowResponseResult = Result<Promise<serde_json::Value>, Box<dyn Error + Send + Sync>>;
+type WorkflowResponseResult =
+    Result<(Promise<serde_json::Value>, Entity), Box<dyn Error + Send + Sync>>;
 type WorkflowResponseSender = tokio::sync::oneshot::Sender<WorkflowResponseResult>;
 
 type WorkflowFeedback = OperationStarted;
@@ -51,6 +52,7 @@ pub struct Context {
 pub struct ExecutorState {
     pub registry: Arc<Mutex<DiagramElementRegistry>>,
     pub send_chan: tokio::sync::mpsc::Sender<Context>,
+    pub despawn_chan: tokio::sync::mpsc::Sender<Entity>,
     pub response_timeout: Duration,
 }
 
@@ -92,8 +94,12 @@ pub async fn post_run(
     };
 
     let response = (match workflow_response {
-        Ok(promise) => {
+        Ok((promise, workflow)) => {
             let promise_state = promise.await;
+            if let Err(err) = state.despawn_chan.send(workflow).await {
+                error!("Failed to request workflow despawn: {err}");
+            }
+
             if promise_state.is_available() {
                 if let Some(result) = promise_state.available() {
                     Ok(result)
@@ -281,8 +287,12 @@ where
     };
 }
 
-#[derive(bevy_ecs::system::Resource)]
+#[derive(bevy_ecs::prelude::Resource)]
 struct RequestReceiver(tokio::sync::mpsc::Receiver<Context>);
+
+/// Receiver for workflows that need to be despawned.
+#[derive(bevy_ecs::prelude::Resource)]
+struct WorkflowDespawnReceiver(tokio::sync::mpsc::Receiver<Entity>);
 
 /// Receives a request from executor service and schedules the workflow.
 fn execute_requests(
@@ -302,7 +312,7 @@ fn execute_requests(
                     if let Some(feedback_tx) = ctx.feedback_tx {
                         cmds.entity(session).insert(feedback_tx);
                     }
-                    Ok(promise)
+                    Ok((promise, workflow.provider()))
                 }
                 Err(err) => Err(err.into()),
             };
@@ -314,7 +324,7 @@ fn execute_requests(
         Err(err) => match err {
             TryRecvError::Empty => {}
             TryRecvError::Disconnected => {
-                app_exit_events.send_default();
+                app_exit_events.write_default();
             }
         },
     }
@@ -346,6 +356,19 @@ fn debug_feedback(
     }
 }
 
+fn despawn_workflows(
+    mut receiver: bevy_ecs::system::ResMut<WorkflowDespawnReceiver>,
+    mut commands: bevy_ecs::system::Commands,
+) {
+    while let Ok(workflow) = receiver.0.try_recv() {
+        let Ok(mut e) = commands.get_entity(workflow) else {
+            continue;
+        };
+
+        e.despawn();
+    }
+}
+
 #[non_exhaustive]
 pub struct ExecutorOptions {
     pub response_timeout: Duration,
@@ -359,20 +382,63 @@ impl Default for ExecutorOptions {
     }
 }
 
+/// Use this to set up a full-fledged bevy App to be used as a diagram execution server.
+/// Pass in just the main subapp using `&mut app.sub_apps_mut().main`.
 pub fn setup_bevy_app(
-    app: &mut bevy_app::App,
+    app: &mut bevy_app::SubApp,
     registry: DiagramElementRegistry,
     options: &ExecutorOptions,
 ) -> ExecutorState {
     let (request_tx, request_rx) = tokio::sync::mpsc::channel::<Context>(10);
+    let (despawn_tx, despawn_rx) = tokio::sync::mpsc::channel(10);
     app.insert_resource(RequestReceiver(request_rx));
+    app.insert_resource(WorkflowDespawnReceiver(despawn_rx));
     app.add_systems(bevy_app::Update, execute_requests);
     app.add_systems(bevy_app::Update, debug_feedback.after(execute_requests));
+    app.add_systems(bevy_app::Update, despawn_workflows);
+
     ExecutorState {
         registry: Arc::new(Mutex::new(registry)),
         send_chan: request_tx,
+        despawn_chan: despawn_tx,
         response_timeout: options.response_timeout,
     }
+}
+
+/// Use this for WASM builds to set up a SubApp that does not belong to any App.
+/// WASM builds need to use just a plain SubApp because the full-fledged App
+/// struct no longer implements Send as of Bevy 0.16.
+pub fn setup_bevy_app_wasm(
+    app: &mut bevy_app::SubApp,
+    registry: DiagramElementRegistry,
+    options: &ExecutorOptions,
+) -> ExecutorState {
+    setup_subapp_defaults(app);
+    setup_bevy_app(app, registry, options)
+}
+
+/// We need to manually setup the SubApp the way it would be setup by a regular
+/// App, because we no longer get the benefit of a regular App in this highly
+/// async environment.
+///
+/// This function definition is based on [`bevy_app::App::default()`]
+fn setup_subapp_defaults(app: &mut bevy_app::SubApp) {
+    use bevy_ecs::schedule::ScheduleLabel;
+    app.update_schedule = Some(bevy_app::Main.intern());
+
+    app.init_resource::<bevy_ecs::reflect::AppTypeRegistry>();
+    app.register_type::<bevy_ecs::name::Name>();
+    app.register_type::<bevy_ecs::hierarchy::ChildOf>();
+    app.register_type::<bevy_ecs::hierarchy::Children>();
+
+    app.add_plugins(bevy_app::MainSchedulePlugin);
+    app.add_systems(
+        bevy_app::First,
+        bevy_ecs::event::event_update_system
+            .in_set(bevy_ecs::event::EventUpdates)
+            .run_if(bevy_ecs::event::event_update_condition),
+    );
+    app.add_event::<bevy_app::AppExit>();
 }
 
 #[cfg(feature = "router")]
@@ -381,7 +447,7 @@ pub(super) fn new_router(
     registry: DiagramElementRegistry,
     options: ExecutorOptions,
 ) -> Router {
-    let executor_state = setup_bevy_app(app, registry, &options);
+    let executor_state = setup_bevy_app(&mut app.sub_apps_mut().main, registry, &options);
 
     let router = Router::new().route("/run", post(post_run));
 
@@ -428,28 +494,36 @@ mod tests {
         cleanup_test: CleanupFn,
     }
 
-    fn setup_test() -> TestFixture<impl FnOnce()> {
+    async fn setup_test() -> TestFixture<impl FnOnce()> {
         let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(NodeBuilderOptions::new("add7"), |builder, _config: ()| {
             builder.create_map_block(|req: i32| req + 7)
         });
 
-        let mut app = bevy_app::App::new();
-        app.add_plugins(ImpulseAppPlugin::default());
         let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel::<()>();
-        app.add_systems(
-            bevy_app::Update,
-            move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
-                if let Ok(_) = recv_stop.try_recv() {
-                    app_exit.send_default();
-                }
-            },
-        );
+        let (router_sender, router_receiver) = tokio::sync::oneshot::channel();
 
-        let router = new_router(&mut app, registry, ExecutorOptions::default());
         let join_handle = thread::spawn(move || {
+            // We need to instantiate the App inside the thread that it will run
+            // inside because App is no longer Send as of Bevy 0.14.
+            let mut app = bevy_app::App::new();
+            app.add_plugins(ImpulseAppPlugin::default());
+            app.add_systems(
+                bevy_app::Update,
+                move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
+                    if let Ok(_) = recv_stop.try_recv() {
+                        app_exit.write_default();
+                    }
+                },
+            );
+
+            let router = new_router(&mut app, registry, ExecutorOptions::default());
+            let _ = router_sender.send(router);
+
             app.run();
         });
+
+        let router = router_receiver.await.unwrap();
 
         TestFixture {
             router,
@@ -481,7 +555,7 @@ mod tests {
         let TestFixture {
             router,
             cleanup_test,
-        } = setup_test();
+        } = setup_test().await;
 
         let diagram = new_add7_diagram();
 

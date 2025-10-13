@@ -682,7 +682,7 @@ mod tests {
         .unwrap();
 
         let mut context = TestingContext::minimal_plugins();
-        let mut promise = context.app.world.command(|cmds| {
+        let mut promise = context.app.world_mut().command(|cmds| {
             let workflow = diagram
                 .spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry)
                 .unwrap();
@@ -718,7 +718,7 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
         let err = context
             .app
-            .world
+            .world_mut()
             .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
             .unwrap_err();
         let section_err = match err.code {
@@ -763,7 +763,7 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
         let err = context
             .app
-            .world
+            .world_mut()
             .command(|cmds| {
                 diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &fixture.registry)
             })

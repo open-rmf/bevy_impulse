@@ -36,69 +36,68 @@ fn main() {
         TimePlugin::default(),
     ));
 
-    let process_door_request = app.world.spawn_service(process_request);
+    let process_door_request = app.world_mut().spawn_service(process_request);
     let door_controller = app.spawn_continuous_service(Update, door_controller);
     let door_state_notifier = app
-        .world
+        .world_mut()
         .spawn_service(door_state_notifier.into_blocking_service());
 
     for door_name in args.names {
         let request_topic_name = format!("door_request/{door_name}");
         let state_topic_name = format!("door_state/{door_name}");
 
-        let workflow =
-            app.world
-                .spawn_io_workflow::<(), Result<(), ArcError>, _>(|scope, builder| {
-                    let command_buffer = builder.create_buffer(BufferSettings::default());
-                    let position_buffer = builder.create_buffer(BufferSettings::default());
-                    let session_buffer = builder.create_buffer(BufferSettings::default());
-                    let status_buffer = builder.create_buffer(BufferSettings::default());
+        let workflow = app
+            .world_mut()
+            .spawn_io_workflow::<(), Result<(), ArcError>, _>(|scope, builder| {
+                let command_buffer = builder.create_buffer(BufferSettings::default());
+                let position_buffer = builder.create_buffer(BufferSettings::default());
+                let session_buffer = builder.create_buffer(BufferSettings::default());
+                let status_buffer = builder.create_buffer(BufferSettings::default());
 
-                    let publisher = zenoh_publisher_node::<protos::DoorState>(
-                        state_topic_name.as_str().into(),
-                        builder,
-                    );
-                    let subscriber = zenoh_subscription_node::<protos::DoorRequest>(
-                        request_topic_name.as_str().into(),
-                        builder,
-                    );
-                    builder.connect(subscriber.output, scope.terminate);
+                let publisher = zenoh_publisher_node::<protos::DoorState>(
+                    state_topic_name.as_str().into(),
+                    builder,
+                );
+                let subscriber = zenoh_subscription_node::<protos::DoorRequest>(
+                    request_topic_name.as_str().into(),
+                    builder,
+                );
+                builder.connect(subscriber.output, scope.terminate);
 
-                    let door_control_buffers = DoorControlBuffers::select_buffers(
-                        position_buffer,
-                        command_buffer,
-                        status_buffer,
-                    );
+                let door_control_buffers = DoorControlBuffers::select_buffers(
+                    position_buffer,
+                    command_buffer,
+                    status_buffer,
+                );
 
-                    let controller_node = builder.create_node(door_controller);
+                let controller_node = builder.create_node(door_controller);
 
-                    builder.chain(scope.input).fork_clone((
-                        |setup: Chain<_>| {
-                            setup
-                                .with_access(door_control_buffers)
-                                .connect(controller_node.input)
-                        },
-                        |setup: Chain<_>| setup.connect(subscriber.input),
-                    ));
+                builder.chain(scope.input).fork_clone((
+                    |setup: Chain<_>| {
+                        setup
+                            .with_access(door_control_buffers)
+                            .connect(controller_node.input)
+                    },
+                    |setup: Chain<_>| setup.connect(subscriber.input),
+                ));
 
-                    let process_request_buffers =
-                        ProcessRequestBuffers::select_buffers(session_buffer);
-                    builder
-                        .chain(subscriber.streams.sample)
-                        .with_access(process_request_buffers)
-                        .then(process_door_request)
-                        .connect(command_buffer.input_slot());
+                let process_request_buffers = ProcessRequestBuffers::select_buffers(session_buffer);
+                builder
+                    .chain(subscriber.streams.sample)
+                    .with_access(process_request_buffers)
+                    .then(process_door_request)
+                    .connect(command_buffer.input_slot());
 
-                    let door_state_buffers =
-                        DoorStateBuffers::select_buffers(session_buffer, status_buffer);
-                    builder
-                        .listen(door_state_buffers)
-                        .then(door_state_notifier)
-                        .dispose_on_none()
-                        .connect(publisher.input);
-                });
+                let door_state_buffers =
+                    DoorStateBuffers::select_buffers(session_buffer, status_buffer);
+                builder
+                    .listen(door_state_buffers)
+                    .then(door_state_notifier)
+                    .dispose_on_none()
+                    .connect(publisher.input);
+            });
 
-        app.world.command(|commands| {
+        app.world_mut().command(|commands| {
             let _ = commands.request((), workflow).detach();
         });
     }
@@ -211,7 +210,7 @@ fn door_controller(
             DoorCommand::Close => {
                 if state.position < 1.0 {
                     // The door is not closed, so let's drive it toward 1.0
-                    let delta = state.nominal_speed * time.delta_seconds();
+                    let delta = state.nominal_speed * time.delta_secs();
                     let new_position = f32::min(state.position + delta, 1.0);
                     state.position = new_position;
                     if new_position == 1.0 {
@@ -227,7 +226,7 @@ fn door_controller(
             DoorCommand::Open => {
                 if state.position > 0.0 {
                     // The door is not open, so let's drive it toward 0.0
-                    let delta = state.nominal_speed * time.delta_seconds();
+                    let delta = state.nominal_speed * time.delta_secs();
                     let new_position = f32::max(state.position - delta, 0.0);
                     state.position = new_position;
                     if new_position == 0.0 {

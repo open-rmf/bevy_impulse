@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_utils::all_tuples;
+use variadics_please::all_tuples;
 
 use crate::{StreamAvailability, StreamPack};
 
