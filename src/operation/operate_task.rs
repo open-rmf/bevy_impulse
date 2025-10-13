@@ -250,6 +250,7 @@ where
                 let r = world
                     .entity_mut(target)
                     .defer_input(session, result, roster);
+
                 world
                     .get_mut::<OperateTask<Response, Streams>>(source)
                     .or_broken()?

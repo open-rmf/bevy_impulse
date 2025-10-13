@@ -33,10 +33,10 @@ mod unzip_schema;
 mod workflow_builder;
 
 #[cfg(feature = "grpc")]
-mod grpc;
+pub mod grpc;
 
 #[cfg(feature = "zenoh")]
-mod zenoh;
+pub mod zenoh;
 
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;

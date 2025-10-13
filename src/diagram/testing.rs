@@ -104,11 +104,6 @@ impl DiagramTestFixture {
             .command(|cmds| cmds.request(request, workflow).take());
         self.context
             .run_with_conditions(&mut recipient.response, conditions);
-        assert!(
-            self.context.no_unhandled_errors(),
-            "{:#?}",
-            self.context.get_unhandled_errors()
-        );
 
         // Some workflows have callbacks with lifelong state that needs to be
         // cleaned up. In the case of zenoh, it's important to get that state
@@ -119,6 +114,8 @@ impl DiagramTestFixture {
         // pool to process this and clean up the callback appropriately.
         self.context.app.world_mut().despawn(workflow.provider());
         self.context.run(1);
+
+        self.context.assert_no_errors();
 
         let taken = recipient.response.take();
         if taken.is_available() {

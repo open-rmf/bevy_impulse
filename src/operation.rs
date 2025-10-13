@@ -285,11 +285,16 @@ impl OperationRoster {
     }
 
     pub fn append(&mut self, other: &mut Self) {
+        // TODO(@mxgrey): Use a proc macro to implement this as well as is_empty
+        // to avoid maintenance bugs whenever a new field gets added.
         self.queue.append(&mut other.queue);
+        self.awake.append(&mut other.awake);
+        self.deferred_queue.append(&mut other.deferred_queue);
         self.cancel.append(&mut other.cancel);
         self.unblock.append(&mut other.unblock);
         self.disposed.append(&mut other.disposed);
         self.cleanup_finished.append(&mut other.cleanup_finished);
+        self.deferred_despawn.append(&mut other.deferred_despawn);
     }
 
     /// Remove all instances of the target from the roster. This prevents a

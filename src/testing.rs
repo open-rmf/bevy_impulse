@@ -55,8 +55,14 @@ impl TestingContext {
     pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
         self.app
             .world_mut()
-            .get_resource_or_insert_with(FlushParameters::default)
+            .get_resource_or_insert_with(FlushParameters::avoid_hanging)
             .flush_loop_limit = limit;
+    }
+
+    pub fn avoid_hanging_flush(&mut self) {
+        self.app
+            .world_mut()
+            .insert_resource(FlushParameters::avoid_hanging());
     }
 
     pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
@@ -92,7 +98,7 @@ impl TestingContext {
     }
 
     pub fn run(&mut self, conditions: impl Into<FlushConditions>) {
-        self.run_impl::<()>(None, conditions);
+        self.run_impl::<()>(None, conditions.into());
     }
 
     pub fn run_while_pending<T>(&mut self, promise: &mut Promise<T>) {
@@ -119,15 +125,13 @@ impl TestingContext {
             if let Some(timeout) = conditions.timeout {
                 let elapsed = std::time::Instant::now() - t_initial;
                 if timeout < elapsed {
-                    println!("Exceeded timeout of {timeout:?}: {elapsed:?}");
                     return false;
                 }
             }
 
+            count += 1;
             if let Some(count_limit) = conditions.update_count {
-                count += 1;
                 if count_limit < count {
-                    println!("Exceeded count limit of {count_limit}: {count}");
                     return false;
                 }
             }
@@ -148,6 +152,14 @@ impl TestingContext {
 
     pub fn get_unhandled_errors(&self) -> Option<&UnhandledErrors> {
         self.app.world().get_resource::<UnhandledErrors>()
+    }
+
+    pub fn assert_no_errors(&self) {
+        assert!(
+            self.no_unhandled_errors(),
+            "{:#?}",
+            self.get_unhandled_errors(),
+        );
     }
 
     // Check that all buffers in the world are empty
@@ -269,7 +281,7 @@ impl TestingContext {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct FlushConditions {
     pub timeout: Option<std::time::Duration>,
     pub update_count: Option<usize>,

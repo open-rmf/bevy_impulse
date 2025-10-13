@@ -18,11 +18,23 @@
 use super::*;
 use crate::{AsyncMap, NeverFinish};
 
-use std::{future::Future, sync::Arc, time::Duration};
+use bevy_derive::{Deref, DerefMut};
+
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 
 use http::uri::PathAndQuery;
+
+use futures::{stream::once, FutureExt, Stream as FutureStream};
+use futures_lite::future::race;
+
 use prost::Message;
 use prost_reflect::{
     DescriptorPool, DynamicMessage, MessageDescriptor, MethodDescriptor, SerializeOptions,
@@ -38,12 +50,11 @@ use tonic::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use tokio::runtime::Runtime;
-
-use futures::{stream::once, FutureExt, Stream as FutureStream};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
-use futures_lite::future::race;
+use tokio::{
+    runtime::Runtime,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+};
 
 use async_std::future::timeout as until_timeout;
 
@@ -66,6 +77,37 @@ pub struct GrpcStreams {
 pub enum NameOrIndex {
     Name(Arc<str>),
     Index(usize),
+}
+
+/// A wrapper struct that will have a tokio task get aborted when dropped.
+#[derive(Debug, Deref, DerefMut)]
+pub struct AbortOnDrop<T>(pub JoinHandle<T>);
+
+impl<T> Future for AbortOnDrop<T> {
+    type Output = <JoinHandle<T> as Future>::Output;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // The Future trait of this wrapper should behave exactly the same as
+        // the regular JoinHandle.
+        Future::poll(Pin::new(&mut self.get_mut().0), cx)
+    }
+}
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.abort();
+    }
+}
+
+pub trait AbortOnDropExt {
+    type Output;
+    fn abort_on_drop(self) -> AbortOnDrop<Self::Output>;
+}
+
+impl<T> AbortOnDropExt for JoinHandle<T> {
+    type Output = T;
+    fn abort_on_drop(self) -> AbortOnDrop<Self::Output> {
+        AbortOnDrop(self)
+    }
 }
 
 impl DiagramElementRegistry {
@@ -110,13 +152,10 @@ impl DiagramElementRegistry {
                             is_server_streaming,
                         )
                         .await
-                    });
+                    })
+                    .abort_on_drop();
 
-                    async move {
-                        let r = task.await.map_err(|e| format!("{e}")).flatten();
-
-                        r
-                    }
+                    async move { task.await.map_err(|e| format!("{e}")).flatten() }
                 });
 
                 Ok(node)
@@ -169,7 +208,8 @@ impl DiagramElementRegistry {
                                     is_server_streaming,
                                 )
                                 .await
-                            });
+                            })
+                            .abort_on_drop();
 
                             async move { task.await.map_err(|e| format!("{e}")).flatten() }
                         },
@@ -511,8 +551,11 @@ mod tests {
             "order": 10
         });
 
-        let result: JsonMessage = fixture.spawn_and_run(&diagram, request).unwrap();
-        assert!(fixture.context.no_unhandled_errors());
+        let result: JsonMessage = fixture.spawn_and_run_with_conditions(
+            &diagram,
+            request,
+            Duration::from_secs(2),
+        ).unwrap();
         let value = result["value"].as_number().unwrap().as_u64().unwrap();
         assert_eq!(value, 55);
 
@@ -585,8 +628,11 @@ mod tests {
             "order": 10
         });
 
-        let result: u64 = fixture.spawn_and_run(&diagram, request).unwrap();
-        assert!(fixture.context.no_unhandled_errors());
+        let result: u64 = fixture.spawn_and_run_with_conditions(
+            &diagram,
+            request,
+            Duration::from_secs(2),
+        ).unwrap();
         assert_eq!(result, 13);
 
         let _ = exit_sender.send(());
@@ -599,6 +645,7 @@ mod tests {
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
         let mut fixture = DiagramTestFixture::new();
+
         fixture
             .registry
             .register_node_builder(NodeBuilderOptions::new("guide"), create_guide_to_goal);
@@ -696,7 +743,7 @@ mod tests {
         }))
         .unwrap();
 
-        let _: () = fixture.spawn_and_run(&diagram, ()).unwrap();
+        let _: () = fixture.spawn_and_run(&diagram ,()).unwrap();
 
         let _ = exit_sender.send(());
     }
@@ -857,7 +904,7 @@ mod tests {
                 let angular_speed = 0.1;
 
                 loop {
-                    std::thread::sleep(Duration::from_micros(100));
+                    std::thread::sleep(Duration::from_millis(1));
                     match receive_stream.try_recv() {
                         Ok(new_stream) => {
                             current_stream = Some(new_stream);
