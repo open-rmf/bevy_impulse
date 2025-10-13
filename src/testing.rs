@@ -17,7 +17,7 @@
 
 pub use bevy_app::{App, Update};
 pub use bevy_ecs::{
-    prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource, World, IntoSystem},
+    prelude::{Commands, Component, Entity, In, IntoSystem, Local, Query, ResMut, Resource, World},
     world::CommandQueue,
 };
 use bevy_time::TimePlugin;

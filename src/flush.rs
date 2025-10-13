@@ -32,10 +32,10 @@ use std::sync::Arc;
 
 use crate::{
     awaken_task, dispose_for_despawned_service, execute_operation, AddImpulse, ChannelQueue,
-    Detached, DisposalNotice, Finished, ImpulseLifecycleChannel, MiscellaneousFailure,
-    OperationError, OperationRequest, OperationRoster, ServiceHook, ServiceLifecycle,
-    ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
-    ValidateScopeReachability, ValidationRequest, WakeQueue, FlushWarning,
+    Detached, DisposalNotice, Finished, FlushWarning, ImpulseLifecycleChannel,
+    MiscellaneousFailure, OperationError, OperationRequest, OperationRoster, ServiceHook,
+    ServiceLifecycle, ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
+    ValidateScopeReachability, ValidationRequest, WakeQueue,
 };
 
 #[cfg(feature = "single_threaded_async")]
@@ -93,12 +93,7 @@ fn flush_impulses_impl(
 ) {
     let parameters = *world.get_resource_or_insert_with(FlushParameters::default);
     let mut roster = OperationRoster::new();
-    collect_from_channels(
-        &parameters,
-        new_service_query,
-        world,
-        &mut roster,
-    );
+    collect_from_channels(&parameters, new_service_query, world, &mut roster);
 
     let mut loop_count = 0;
     while !roster.is_empty() {
@@ -118,9 +113,13 @@ fn flush_impulses_impl(
                     .get_resource_or_insert_with(DeferredRoster::default)
                     .append(&mut roster);
 
-                world.get_resource_or_insert_with(UnhandledErrors::default)
+                world
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .flush_warnings
-                    .push(FlushWarning::ExceededFlushLoopLimit { limit, reached: loop_count });
+                    .push(FlushWarning::ExceededFlushLoopLimit {
+                        limit,
+                        reached: loop_count,
+                    });
 
                 break;
             }
@@ -146,9 +145,13 @@ fn flush_impulses_impl(
             loop_count += 1;
             if let Some(limit) = flush_loop_limit {
                 if limit <= loop_count {
-                    world.get_resource_or_insert_with(UnhandledErrors::default)
+                    world
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .flush_warnings
-                        .push(FlushWarning::ExceededFlushLoopLimit { limit, reached: loop_count });
+                        .push(FlushWarning::ExceededFlushLoopLimit {
+                            limit,
+                            reached: loop_count,
+                        });
                     break;
                 }
             }
@@ -163,12 +166,7 @@ fn flush_impulses_impl(
             garbage_cleanup(world, &mut roster);
         }
 
-        collect_from_channels(
-            &parameters,
-            new_service_query,
-            world,
-            &mut roster,
-        );
+        collect_from_channels(&parameters, new_service_query, world, &mut roster);
     }
 }
 
@@ -198,9 +196,13 @@ fn collect_from_channels(
         (item)(world, roster);
         if let Some(limit) = parameters.channel_received_limit {
             if limit <= received_count {
-                world.get_resource_or_insert_with(UnhandledErrors::default)
+                world
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .flush_warnings
-                    .push(FlushWarning::ExceededChannelReceivedLimit { limit, reached: received_count });
+                    .push(FlushWarning::ExceededChannelReceivedLimit {
+                        limit,
+                        reached: received_count,
+                    });
                 break;
             }
         }

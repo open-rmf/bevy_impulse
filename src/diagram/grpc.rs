@@ -136,24 +136,25 @@ impl DiagramElementRegistry {
                     // The tonic gRPC client needs to be run inside a tokio
                     // async runtime, so we spawn a tokio task here and use the
                     // JoinHandle to pass its result through the workflow.
-                    let task = rt.spawn(async move {
-                        let client = client.await?;
+                    let task = rt
+                        .spawn(async move {
+                            let client = client.await?;
 
-                        // Convert the request message into a stream of a single dynamic message
-                        let request = input.request;
-                        let request = Request::new(once(async move { request }));
-                        execute(
-                            request,
-                            client,
-                            codec,
-                            path,
-                            config.timeout,
-                            input.streams,
-                            is_server_streaming,
-                        )
-                        .await
-                    })
-                    .abort_on_drop();
+                            // Convert the request message into a stream of a single dynamic message
+                            let request = input.request;
+                            let request = Request::new(once(async move { request }));
+                            execute(
+                                request,
+                                client,
+                                codec,
+                                path,
+                                config.timeout,
+                                input.streams,
+                                is_server_streaming,
+                            )
+                            .await
+                        })
+                        .abort_on_drop();
 
                     async move { task.await.map_err(|e| format!("{e}")).flatten() }
                 });
@@ -193,23 +194,24 @@ impl DiagramElementRegistry {
                             // The tonic gRPC client needs to be run inside a tokio
                             // async runtime, so we spawn a tokio task here and use the
                             // JoinHandle to pass its result through the workflow.
-                            let task = rt.spawn(async move {
-                                let client = client.await?;
+                            let task = rt
+                                .spawn(async move {
+                                    let client = client.await?;
 
-                                let request =
-                                    Request::new(UnboundedReceiverStream::new(input.request));
-                                execute(
-                                    request,
-                                    client,
-                                    codec,
-                                    path,
-                                    config.timeout,
-                                    input.streams,
-                                    is_server_streaming,
-                                )
-                                .await
-                            })
-                            .abort_on_drop();
+                                    let request =
+                                        Request::new(UnboundedReceiverStream::new(input.request));
+                                    execute(
+                                        request,
+                                        client,
+                                        codec,
+                                        path,
+                                        config.timeout,
+                                        input.streams,
+                                        is_server_streaming,
+                                    )
+                                    .await
+                                })
+                                .abort_on_drop();
 
                             async move { task.await.map_err(|e| format!("{e}")).flatten() }
                         },
@@ -551,11 +553,9 @@ mod tests {
             "order": 10
         });
 
-        let result: JsonMessage = fixture.spawn_and_run_with_conditions(
-            &diagram,
-            request,
-            Duration::from_secs(2),
-        ).unwrap();
+        let result: JsonMessage = fixture
+            .spawn_and_run_with_conditions(&diagram, request, Duration::from_secs(2))
+            .unwrap();
         let value = result["value"].as_number().unwrap().as_u64().unwrap();
         assert_eq!(value, 55);
 
@@ -628,11 +628,9 @@ mod tests {
             "order": 10
         });
 
-        let result: u64 = fixture.spawn_and_run_with_conditions(
-            &diagram,
-            request,
-            Duration::from_secs(2),
-        ).unwrap();
+        let result: u64 = fixture
+            .spawn_and_run_with_conditions(&diagram, request, Duration::from_secs(2))
+            .unwrap();
         assert_eq!(result, 13);
 
         let _ = exit_sender.send(());
@@ -743,7 +741,7 @@ mod tests {
         }))
         .unwrap();
 
-        let _: () = fixture.spawn_and_run(&diagram ,()).unwrap();
+        let _: () = fixture.spawn_and_run(&diagram, ()).unwrap();
 
         let _ = exit_sender.send(());
     }

@@ -64,10 +64,7 @@ where
         }
     }
 
-    pub fn get(
-        &self,
-        entity: Entity,
-    ) -> Option<Service<Request, Response, StreamFilters::Pack>> {
+    pub fn get(&self, entity: Entity) -> Option<Service<Request, Response, StreamFilters::Pack>> {
         self.query.get(entity).ok().and_then(|(e, availability)| {
             if StreamFilters::are_required_streams_available(availability) {
                 Some(Service::new(e))

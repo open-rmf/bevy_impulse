@@ -11,7 +11,7 @@ use axum::{
 };
 #[cfg(feature = "router")]
 use axum::{routing::post, Router};
-use bevy_ecs::{schedule::IntoScheduleConfigs, prelude::Entity};
+use bevy_ecs::{prelude::Entity, schedule::IntoScheduleConfigs};
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +31,8 @@ use crate::api::error_responses::WorkflowCancelledResponse;
 #[cfg(feature = "debug")]
 type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
 
-type WorkflowResponseResult = Result<(Promise<serde_json::Value>, Entity), Box<dyn Error + Send + Sync>>;
+type WorkflowResponseResult =
+    Result<(Promise<serde_json::Value>, Entity), Box<dyn Error + Send + Sync>>;
 type WorkflowResponseSender = tokio::sync::oneshot::Sender<WorkflowResponseResult>;
 
 type WorkflowFeedback = OperationStarted;

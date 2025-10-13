@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_ecs::prelude::{Commands, Entity, World, ChildOf};
+use bevy_ecs::prelude::{ChildOf, Commands, Entity, World};
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 use tokio::sync::mpsc::unbounded_channel;

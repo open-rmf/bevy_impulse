@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Commands, Entity, World, ChildOf},
+    prelude::{ChildOf, Commands, Entity, World},
     system::Command,
 };
 

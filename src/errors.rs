@@ -150,18 +150,11 @@ pub struct DuplicateStream {
 /// your system is over capacity.
 pub enum FlushWarning {
     #[error("exceeded flush loop limit of {limit} with {reached}")]
-    ExceededFlushLoopLimit {
-        limit: usize,
-        reached: usize,
-    },
-    #[error("exceeded poll limit {limit} with {reached} while performing single-threaded execution")]
-    ExceededSingleThreadedPollLimit {
-        limit: usize,
-        reached: usize,
-    },
+    ExceededFlushLoopLimit { limit: usize, reached: usize },
+    #[error(
+        "exceeded poll limit {limit} with {reached} while performing single-threaded execution"
+    )]
+    ExceededSingleThreadedPollLimit { limit: usize, reached: usize },
     #[error("exceeded channel received limit of {limit} with {reached}")]
-    ExceededChannelReceivedLimit {
-        limit: usize,
-        reached: usize,
-    }
+    ExceededChannelReceivedLimit { limit: usize, reached: usize },
 }

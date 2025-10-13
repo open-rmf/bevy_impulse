@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_ecs::prelude::{Command, Component, Entity, Resource, World, ChildOf};
+use bevy_ecs::prelude::{ChildOf, Command, Component, Entity, Resource, World};
 
 use backtrace::Backtrace;
 
