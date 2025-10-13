@@ -263,7 +263,7 @@ impl DiagramElementRegistry {
         self.register_node_builder_fallible(
             NodeBuilderOptions::new("zenoh_publisher").with_default_display_text("Zenoh Publisher"),
             move |builder, config: ZenohPublisherConfig| {
-                builder.commands().add(ensure_session.clone());
+                builder.commands().queue(ensure_session.clone());
 
                 let encoder: Codec = (&config.encoder).try_into()?;
                 let ordering = config.ordering;

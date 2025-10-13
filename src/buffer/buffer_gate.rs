@@ -181,7 +181,7 @@ impl<'w, 's, 'a> BufferGateMut<'w, 's, 'a> {
 impl<'w, 's, 'a> Drop for BufferGateMut<'w, 's, 'a> {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(NotifyBufferUpdate::new(
+            self.commands.queue(NotifyBufferUpdate::new(
                 self.buffer,
                 self.session,
                 self.accessor,

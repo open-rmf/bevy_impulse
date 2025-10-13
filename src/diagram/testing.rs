@@ -55,7 +55,7 @@ impl DiagramTestFixture {
     {
         self.context
             .app
-            .world
+            .world_mut()
             .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
     }
 
@@ -104,11 +104,19 @@ impl DiagramTestFixture {
             .command(|cmds| cmds.request(request, workflow).take());
         self.context
             .run_with_conditions(&mut recipient.response, conditions);
-        assert!(
-            self.context.no_unhandled_errors(),
-            "{:#?}",
-            self.context.get_unhandled_errors()
-        );
+
+        // Some workflows have callbacks with lifelong state that needs to be
+        // cleaned up. In the case of zenoh, it's important to get that state
+        // cleaned up before the tokio runtime starts to wind down. It seems we
+        // can encounter a race condition with that which can lead to a panic.
+        // Despawning the entity will signal the task pool that the task can be
+        // dropped, and then running one cycle of the app will allow the task
+        // pool to process this and clean up the callback appropriately.
+        self.context.app.world_mut().despawn(workflow.provider());
+        self.context.run(1);
+
+        self.context.assert_no_errors();
+
         let taken = recipient.response.take();
         if taken.is_available() {
             Ok((taken.available().unwrap(), recipient.streams))

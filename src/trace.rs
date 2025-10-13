@@ -359,7 +359,7 @@ mod tests {
         let recorder = fixture
             .context
             .app
-            .world
+            .world_mut()
             .resource_mut::<TraceRecorder>()
             .clone();
         confirm_trace(&recorder, route, session);
@@ -368,7 +368,7 @@ mod tests {
         fixture
             .context
             .app
-            .world
+            .world_mut()
             .resource_mut::<TraceRecorder>()
             .record
             .clear();

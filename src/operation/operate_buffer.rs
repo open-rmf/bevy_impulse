@@ -15,10 +15,7 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Bundle, Component, Entity, World},
-    system::Command,
-};
+use bevy_ecs::prelude::{Bundle, Command, Component, Entity, World};
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -229,7 +226,7 @@ impl Command for OnNewBufferValue {
 
         buffer_targets.0.push(self.buffer);
 
-        let Some(mut target_mut) = world.get_entity_mut(self.target) else {
+        let Ok(mut target_mut) = world.get_entity_mut(self.target) else {
             self.on_failure(world);
             return;
         };

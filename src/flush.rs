@@ -17,11 +17,10 @@
 
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::{Added, Entity, Query, QueryState, Resource, With, World},
-    schedule::{IntoSystemConfigs, SystemConfigs},
-    system::{Command, SystemState},
+    prelude::*,
+    schedule::{IntoScheduleConfigs, ScheduleConfigs},
+    system::{ScheduleSystem, SystemState},
 };
-use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -33,16 +32,16 @@ use std::sync::Arc;
 
 use crate::{
     awaken_task, dispose_for_despawned_service, execute_operation, AddImpulse, ChannelQueue,
-    Detached, DisposalNotice, Finished, ImpulseLifecycleChannel, MiscellaneousFailure,
-    OperationError, OperationRequest, OperationRoster, ServiceHook, ServiceLifecycle,
-    ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
+    Detached, DisposalNotice, Finished, FlushWarning, ImpulseLifecycleChannel,
+    MiscellaneousFailure, OperationError, OperationRequest, OperationRoster, ServiceHook,
+    ServiceLifecycle, ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
     ValidateScopeReachability, ValidationRequest, WakeQueue,
 };
 
 #[cfg(feature = "single_threaded_async")]
 use crate::async_execution::SingleThreadedExecution;
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, Copy)]
 pub struct FlushParameters {
     /// By default, a flush will loop until the whole [`OperationRoster`] is empty.
     /// If there are loops of blocking services then it is possible for the flush
@@ -65,9 +64,26 @@ pub struct FlushParameters {
     ///
     /// A value of `None` means the futures can be polled indefinitely (this is the default).
     pub single_threaded_poll_limit: Option<usize>,
+    /// How many items can be received from the channel in one flush. The channel
+    /// is implemented as unbounded, so if something is pushing commands to the
+    /// channel faster than they can be processed, the flush will appear to be
+    /// hanging.
+    pub channel_received_limit: Option<usize>,
 }
 
-pub fn flush_impulses() -> SystemConfigs {
+impl FlushParameters {
+    /// A set of options to prevent the activity flush system from getting hung
+    /// up on a flood of commands.
+    pub fn avoid_hanging() -> Self {
+        Self {
+            flush_loop_limit: Some(10),
+            single_threaded_poll_limit: Some(100),
+            channel_received_limit: Some(100),
+        }
+    }
+}
+
+pub fn flush_impulses() -> ScheduleConfigs<ScheduleSystem> {
     flush_impulses_impl.into_configs()
 }
 
@@ -75,34 +91,38 @@ fn flush_impulses_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
-    let parameters = world.get_resource_or_insert_with(FlushParameters::default);
-    let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
+    let parameters = *world.get_resource_or_insert_with(FlushParameters::default);
     let mut roster = OperationRoster::new();
-    collect_from_channels(
-        single_threaded_poll_limit,
-        new_service_query,
-        world,
-        &mut roster,
-    );
+    collect_from_channels(&parameters, new_service_query, world, &mut roster);
 
     let mut loop_count = 0;
     while !roster.is_empty() {
         for e in roster.deferred_despawn.drain(..) {
-            if let Some(e_mut) = world.get_entity_mut(e) {
-                e_mut.despawn_recursive();
+            if let Ok(e_mut) = world.get_entity_mut(e) {
+                e_mut.despawn();
             }
         }
 
-        let parameters = world.get_resource_or_insert_with(FlushParameters::default);
+        let parameters = *world.get_resource_or_insert_with(FlushParameters::default);
         let flush_loop_limit = parameters.flush_loop_limit;
-        let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
-        if flush_loop_limit.is_some_and(|limit| limit <= loop_count) {
-            // We have looped beyoond the limit, so we will defer anything that
-            // remains in the roster and stop looping from here.
-            world
-                .get_resource_or_insert_with(DeferredRoster::default)
-                .append(&mut roster);
-            break;
+        if let Some(limit) = flush_loop_limit {
+            if limit <= loop_count {
+                // We have looped beyoond the limit, so we will defer anything that
+                // remains in the roster and stop looping from here.
+                world
+                    .get_resource_or_insert_with(DeferredRoster::default)
+                    .append(&mut roster);
+
+                world
+                    .get_resource_or_insert_with(UnhandledErrors::default)
+                    .flush_warnings
+                    .push(FlushWarning::ExceededFlushLoopLimit {
+                        limit,
+                        reached: loop_count,
+                    });
+
+                break;
+            }
         }
 
         loop_count += 1;
@@ -123,8 +143,17 @@ fn flush_impulses_impl(
             });
             garbage_cleanup(world, &mut roster);
             loop_count += 1;
-            if flush_loop_limit.is_some_and(|limit| limit < loop_count) {
-                break;
+            if let Some(limit) = flush_loop_limit {
+                if limit <= loop_count {
+                    world
+                        .get_resource_or_insert_with(UnhandledErrors::default)
+                        .flush_warnings
+                        .push(FlushWarning::ExceededFlushLoopLimit {
+                            limit,
+                            reached: loop_count,
+                        });
+                    break;
+                }
             }
         }
 
@@ -137,12 +166,7 @@ fn flush_impulses_impl(
             garbage_cleanup(world, &mut roster);
         }
 
-        collect_from_channels(
-            single_threaded_poll_limit,
-            new_service_query,
-            world,
-            &mut roster,
-        );
+        collect_from_channels(&parameters, new_service_query, world, &mut roster);
     }
 }
 
@@ -157,18 +181,32 @@ fn garbage_cleanup(world: &mut World, roster: &mut OperationRoster) {
 }
 
 fn collect_from_channels(
-    _single_threaded_poll_limit: Option<usize>,
+    parameters: &FlushParameters,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
     // Get the receiver for async task commands
+    let mut received_count = 0;
     while let Ok(item) = world
         .get_resource_or_insert_with(ChannelQueue::new)
         .receiver
         .try_recv()
     {
         (item)(world, roster);
+        if let Some(limit) = parameters.channel_received_limit {
+            if limit <= received_count {
+                world
+                    .get_resource_or_insert_with(UnhandledErrors::default)
+                    .flush_warnings
+                    .push(FlushWarning::ExceededChannelReceivedLimit {
+                        limit,
+                        reached: received_count,
+                    });
+                break;
+            }
+        }
+        received_count += 1;
     }
 
     roster.process_deferals();
@@ -285,7 +323,7 @@ fn collect_from_channels(
     }
 
     #[cfg(feature = "single_threaded_async")]
-    SingleThreadedExecution::world_poll(world, _single_threaded_poll_limit);
+    SingleThreadedExecution::world_poll(world, parameters.single_threaded_poll_limit);
 }
 
 fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, unused: bool) {
@@ -333,13 +371,13 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
     }
 
     if let Some(detached_impulse) = detached_impulse {
-        if let Some(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
-            detached_impulse_mut.remove_parent();
+        if let Ok(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
+            detached_impulse_mut.remove::<ChildOf>();
         }
     }
 
-    if let Some(unused_target_mut) = world.get_entity_mut(target) {
-        unused_target_mut.despawn_recursive();
+    if let Ok(unused_target_mut) = world.get_entity_mut(target) {
+        unused_target_mut.despawn();
     }
 
     if unused {

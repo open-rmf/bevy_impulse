@@ -191,7 +191,7 @@ fn main() {
     }))
     .unwrap();
 
-    app.world.command(|commands| {
+    app.world_mut().command(|commands| {
         let workflow = diagram
             .spawn_io_workflow::<(), ()>(commands, &mut registry)
             .unwrap();
@@ -244,7 +244,7 @@ fn move_robot(
             return;
         };
 
-        *t -= time.delta_seconds();
+        *t -= time.delta_secs();
         if *t <= 0.0 {
             order.respond(());
         }
@@ -252,5 +252,5 @@ fn move_robot(
 }
 
 fn exit_app(In(_): In<()>, mut exit: EventWriter<AppExit>) {
-    exit.send(AppExit);
+    exit.write(AppExit::Success);
 }

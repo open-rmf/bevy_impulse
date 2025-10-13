@@ -31,7 +31,6 @@ use bevy_ecs::{
     system::{BoxedSystem, EntityCommands, IntoSystem},
     world::EntityWorldMut,
 };
-use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 use std::future::Future;
 
@@ -39,17 +38,17 @@ pub trait IsAsyncService<M> {}
 
 #[derive(Component)]
 struct AsyncServiceStorage<Request, Streams: StreamPack, Task>(
-    Option<BoxedSystem<AsyncService<Request, Streams>, Task>>,
+    Option<BoxedSystem<In<AsyncService<Request, Streams>>, Task>>,
 );
 
 #[derive(Component)]
 struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(
-    BoxedSystem<AsyncService<Request, Streams>, Task>,
+    BoxedSystem<In<AsyncService<Request, Streams>>, Task>,
 );
 
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
+    Sys: IntoSystem<In<AsyncService<Request, Streams>>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -77,7 +76,7 @@ where
 
 impl<Request, Streams, Task, M, Sys> IsAsyncService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
+    Sys: IntoSystem<In<AsyncService<Request, Streams>>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -151,8 +150,8 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
-                        task_mut.despawn_recursive();
+                    if let Ok(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                        task_mut.despawn();
                     }
                 }
                 if let Some(stop) = stop {
@@ -244,7 +243,7 @@ where
                 roster,
             },
     } = cmd;
-    let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+    let mut service = if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
         if let Some(mut storage) =
             provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>()
         {
@@ -406,7 +405,7 @@ pub trait IntoAsyncService<M> {
 
 impl<Request, Response, M, Sys> IntoAsyncService<AsAsyncService<(Request, Response, M)>> for Sys
 where
-    Sys: IntoSystem<Request, Response, M>,
+    Sys: IntoSystem<In<Request>, Response, M>,
     Request: 'static + Send,
     Response: 'static + Send,
 {
@@ -418,7 +417,7 @@ where
 
 impl<Request, Task, M, Sys> IntoService<(Request, Task, M)> for AsAsyncService<Sys>
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<In<Request>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -441,7 +440,7 @@ where
 
 impl<Request, Task, M, Sys> IsAsyncService<(Request, Task, M)> for AsAsyncService<Sys>
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<In<Request>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,

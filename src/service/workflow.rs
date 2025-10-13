@@ -24,8 +24,7 @@ use crate::{
     SessionStatus, SingleTargetStorage, StreamPack,
 };
 
-use bevy_ecs::prelude::{Component, Entity, World};
-use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
+use bevy_ecs::prelude::{ChildOf, Component, Entity, World};
 
 pub(crate) struct WorkflowHooks {}
 
@@ -120,7 +119,7 @@ where
         } = source_mut.take_input::<Request>()?;
         let scoped_session = world
             .spawn((ParentSession::new(session), SessionStatus::Active))
-            .set_parent(session)
+            .insert(ChildOf(session))
             .id();
 
         let result = serve_workflow_impl::<Request, Response, Streams>(
@@ -140,8 +139,8 @@ where
         );
 
         if result.is_err() {
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-                scoped_session_mut.despawn_recursive();
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn();
             }
         }
 
@@ -337,8 +336,8 @@ fn serve_next_workflow_request<Request, Response, Streams>(
         .is_err()
         {
             // The workflow will not run, so we should despawn the scoped session
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-                scoped_session_mut.despawn_recursive();
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn();
             }
 
             // The service did not launch so we should move onto the next item

@@ -18,7 +18,6 @@
 use std::borrow::Cow;
 
 use bevy_ecs::prelude::{Component, Entity};
-use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
     add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput, NamedValue,
@@ -97,7 +96,7 @@ impl<T: 'static + Send + Sync> Impulsive for Push<T> {
         }
 
         if is_stream {
-            world.entity_mut(source).despawn_recursive();
+            world.entity_mut(source).despawn();
         }
         Ok(())
     }

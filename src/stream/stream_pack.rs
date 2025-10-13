@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::prelude::{Commands, Entity, World};
-use bevy_utils::all_tuples;
+use variadics_please::all_tuples;
 
 use std::sync::Arc;
 

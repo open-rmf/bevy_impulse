@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Entity, Query, With},
-    query::{QueryEntityError, QueryIter, ReadOnlyWorldQuery},
+    query::{QueryFilter, QueryIter},
     system::SystemParam,
 };
 
@@ -36,7 +36,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     StreamFilters: StreamFilter + 'static,
-    ServiceFilter: ReadOnlyWorldQuery + 'static,
+    ServiceFilter: QueryFilter + 'static,
 {
     query: Query<
         'w,
@@ -53,7 +53,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     StreamFilters: StreamFilter,
-    ServiceFilter: ReadOnlyWorldQuery + 'static,
+    ServiceFilter: QueryFilter + 'static,
 {
     pub fn iter(
         &self,
@@ -64,15 +64,12 @@ where
         }
     }
 
-    pub fn get(
-        &self,
-        entity: Entity,
-    ) -> Result<Service<Request, Response, StreamFilters::Pack>, QueryEntityError> {
-        self.query.get(entity).and_then(|(e, availability)| {
+    pub fn get(&self, entity: Entity) -> Option<Service<Request, Response, StreamFilters::Pack>> {
+        self.query.get(entity).ok().and_then(|(e, availability)| {
             if StreamFilters::are_required_streams_available(availability) {
-                Ok(Service::new(e))
+                Some(Service::new(e))
             } else {
-                Err(QueryEntityError::QueryDoesNotMatch(e))
+                None
             }
         })
     }
@@ -84,7 +81,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     StreamFilters: StreamFilter,
-    ServiceFilter: ReadOnlyWorldQuery + 'static,
+    ServiceFilter: QueryFilter + 'static,
 {
     inner: QueryIter<
         'w,
@@ -101,7 +98,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     StreamFilters: StreamFilter,
-    ServiceFilter: ReadOnlyWorldQuery + 'static,
+    ServiceFilter: QueryFilter + 'static,
 {
     type Item = Service<Request, Response, StreamFilters::Pack>;
 

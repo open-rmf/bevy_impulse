@@ -25,6 +25,8 @@ use std::{borrow::Cow, sync::Arc};
 
 use crate::{Broken, Cancel, Disposal, OperationError};
 
+use thiserror::Error as ThisError;
+
 /// This resource stores errors that have occurred that could not be handled
 /// internally or communicated to the user by any other means.
 #[derive(Resource, Default, Clone, Debug)]
@@ -38,11 +40,14 @@ pub struct UnhandledErrors {
     pub unused_targets: Vec<UnusedTargetDrop>,
     pub connections: Vec<ConnectionFailure>,
     pub duplicate_streams: Vec<DuplicateStream>,
+    pub flush_warnings: Vec<FlushWarning>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
 
 impl UnhandledErrors {
     pub fn is_empty(&self) -> bool {
+        // TODO(@mxgrey): Implement this is a proc macro to avoid maintenance
+        // bugs whenever a new field gets added.
         self.setup.is_empty()
             && self.cancellations.is_empty()
             && self.operations.is_empty()
@@ -52,6 +57,7 @@ impl UnhandledErrors {
             && self.unused_targets.is_empty()
             && self.connections.is_empty()
             && self.duplicate_streams.is_empty()
+            && self.flush_warnings.is_empty()
             && self.miscellaneous.is_empty()
     }
 }
@@ -137,4 +143,18 @@ pub struct DuplicateStream {
     /// The name of the stream that was duplicated (if it was an anonymous stream
     /// this will be [`None`]).
     pub stream_name: Option<Cow<'static, str>>,
+}
+
+#[derive(Clone, Debug, ThisError)]
+/// A problem occurred while flushing workflow activity. This may indicate that
+/// your system is over capacity.
+pub enum FlushWarning {
+    #[error("exceeded flush loop limit of {limit} with {reached}")]
+    ExceededFlushLoopLimit { limit: usize, reached: usize },
+    #[error(
+        "exceeded poll limit {limit} with {reached} while performing single-threaded execution"
+    )]
+    ExceededSingleThreadedPollLimit { limit: usize, reached: usize },
+    #[error("exceeded channel received limit of {limit} with {reached}")]
+    ExceededChannelReceivedLimit { limit: usize, reached: usize },
 }

@@ -198,7 +198,7 @@ fn dispose_for_unavailable_service<T: 'static + Send + Sync>(
     roster: &mut OperationRoster,
 ) {
     let disposal = Disposal::service_unavailable(service, source);
-    if let Some(mut source_mut) = world.get_entity_mut(source) {
+    if let Ok(mut source_mut) = world.get_entity_mut(source) {
         while let Ok(Input { session, .. }) = source_mut.take_input::<T>() {
             source_mut.emit_disposal(session, disposal.clone(), roster);
         }

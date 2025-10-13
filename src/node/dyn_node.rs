@@ -28,6 +28,7 @@ use crate::{
 };
 
 /// A type erased [`Node`]
+#[derive(Debug)]
 pub struct DynNode {
     pub input: DynInputSlot,
     pub output: DynOutput,
@@ -73,6 +74,7 @@ impl DynInputSlot {
         &self.type_info
     }
 
+    #[cfg(feature = "diagram")]
     pub(crate) fn new(scope: Entity, source: Entity, type_info: TypeInfo) -> Self {
         Self {
             scope,
@@ -154,7 +156,7 @@ impl DynOutput {
             });
         }
 
-        builder.commands().add(Connect {
+        builder.commands().queue(Connect {
             original_target: self.id(),
             new_target: input.id(),
         });
@@ -162,6 +164,7 @@ impl DynOutput {
         Ok(())
     }
 
+    #[cfg(feature = "diagram")]
     pub(crate) fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
         Self {
             scope,
@@ -234,7 +237,7 @@ impl DynStreamInputPack {
 
 /// This is a pack of streams outputs whose message types are determined at runtime.
 /// This can be created using the [`crate::StreamPack`].
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct DynStreamOutputPack {
     pub named: HashMap<Cow<'static, str>, DynOutput>,
     pub anonymous: HashMap<TypeInfo, DynOutput>,

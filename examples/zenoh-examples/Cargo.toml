@@ -14,7 +14,6 @@ path = "src/use_door.rs"
 [dependencies]
 bevy_impulse = { version = "0.0.2", path = "../..", features = ["diagram"] }
 bevy_app = { workspace = true }
-bevy_core = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_time = { workspace = true }
 futures = { workspace = true }
