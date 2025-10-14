@@ -356,7 +356,7 @@ pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
 /// not have any messages pushed into them directly as input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MessageTypeHint {
-    /// An accessor is asking specifically for this type T via BufferKey<T>
+    /// An accessor is asking specifically for this type T via `BufferKey<T>`
     Exact(TypeInfo),
     /// An accessor is using a generalized buffer, e.g. JsonBuffer or AnyBuffer,
     /// which can be represented by this type, but an exact type should be used
