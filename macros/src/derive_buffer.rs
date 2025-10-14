@@ -213,7 +213,7 @@ impl FieldSettings {
     }
 
     fn default_field_for_joined(ty: &Type) -> Type {
-        parse_quote! { ::bevy_impulse::Buffer<#ty> }
+        parse_quote! { ::bevy_impulse::FetchFromBuffer<#ty> }
     }
 
     fn default_field_for_key(ty: &Type) -> Type {
@@ -312,12 +312,12 @@ fn impl_select_buffers(
         impl #impl_generics #struct_ident #ty_generics #where_clause {
             #buffer_struct_vis fn select_buffers(
                 #(
-                    #field_ident: #buffer,
+                    #field_ident: impl Into< #buffer >,
                 )*
             ) -> #buffer_struct_ident #ty_generics {
                 #buffer_struct_ident {
                     #(
-                        #field_ident,
+                        #field_ident: #field_ident .into(),
                     )*
                 }
             }
@@ -427,9 +427,9 @@ fn impl_joined(
         impl #impl_generics ::bevy_impulse::Joining for #struct_ident #ty_generics #where_clause {
             type Item = #item_struct_ident #ty_generics;
 
-            fn pull(&self, session: ::bevy_impulse::re_exports::Entity, world: &mut ::bevy_impulse::re_exports::World) -> Result<Self::Item, ::bevy_impulse::OperationError> {
+            fn fetch_for_join(&self, session: ::bevy_impulse::re_exports::Entity, world: &mut ::bevy_impulse::re_exports::World) -> Result<Self::Item, ::bevy_impulse::OperationError> {
                 #(
-                    let #field_ident = self.#field_ident.pull(session, world)?;
+                    let #field_ident = self.#field_ident.fetch_for_join(session, world)?;
                 )*
 
                 Ok(Self::Item {#(

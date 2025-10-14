@@ -960,7 +960,7 @@ mod tests {
                 },
             )
             .with_buffer_access()
-            .with_fork_result()
+            .with_result()
             .with_common_response();
 
         let diagram = Diagram::from_json(json!({
@@ -1060,7 +1060,7 @@ mod tests {
                 },
             )
             .with_listen()
-            .with_fork_result()
+            .with_result()
             .with_common_response();
 
         let diagram = Diagram::from_json(json!({

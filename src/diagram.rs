@@ -70,8 +70,8 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    is_default, Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
-    SpawnWorkflowExt, SplitConnectionError, StreamPack,
+    is_default, BufferIdentifier, Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage,
+    Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
@@ -814,13 +814,13 @@ pub enum DiagramErrorCode {
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
-    #[error("Serialization was disabled for the target message type.")]
+    #[error("Serialization was not registered for the target message type.")]
     NotSerializable(TypeInfo),
 
-    #[error("Deserialization was disabled for the target message type.")]
+    #[error("Deserialization was not registered for the target message type.")]
     NotDeserializable(TypeInfo),
 
-    #[error("Cloning was disabled for the target message type. Type: {0}")]
+    #[error("Cloning was not registered for the target message type. Type: {0}")]
     NotCloneable(TypeInfo),
 
     #[error("The target message type does not support unzipping. Type: {0}")]
@@ -833,7 +833,9 @@ pub enum DiagramErrorCode {
         elements: Vec<TypeInfo>,
     },
 
-    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output. Type: {0}")]
+    #[error(
+        "Call .with_result() on your node to be able to fork its Result-type output. Type: {0}"
+    )]
     CannotForkResult(TypeInfo),
 
     #[error("Response cannot be split. Make sure to use .with_split() when building the node. Type: {0}")]
@@ -846,6 +848,12 @@ pub enum DiagramErrorCode {
 
     #[error("Empty join is not allowed.")]
     EmptyJoin,
+
+    #[error("Unknown buffer identifier [{unknown}] used for join containing {}", format_list(.available))]
+    UnknownJoinField {
+        unknown: BufferIdentifier<'static>,
+        available: Vec<BufferIdentifier<'static>>,
+    },
 
     #[error("Target type cannot be determined from [next] and [target_node] is not provided or cannot be inferred from.")]
     UnknownTarget,
@@ -1296,7 +1304,7 @@ mod tests {
         fixture
             .registry
             .register_message::<Result<f32, ()>>()
-            .with_fork_result();
+            .with_result();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

@@ -499,13 +499,13 @@ impl<T: 'static + Send + Sync> NonCopyBuffer<T> {
         let any_interface = AnyBuffer::interface_for::<T>();
         any_interface.register_buffer_downcast(
             std::any::TypeId::of::<NonCopyBuffer<T>>(),
-            Box::new(|location| {
-                Box::new(NonCopyBuffer::<T> {
+            Box::new(|buffer| {
+                Ok(Box::new(NonCopyBuffer::<T> {
                     inner: Buffer {
-                        location,
+                        location: buffer.location,
                         _ignore: Default::default(),
                     },
-                })
+                }))
             }),
         );
     }
@@ -573,8 +573,12 @@ impl<T: 'static + Send + Sync> Buffering for NonCopyBuffer<T> {
 
 impl<T: 'static + Send + Sync> Joining for NonCopyBuffer<T> {
     type Item = T;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        self.inner.pull(session, world)
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
+        self.inner.fetch_for_join(session, world)
     }
 }
 

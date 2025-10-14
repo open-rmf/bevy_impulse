@@ -83,6 +83,21 @@
         "buffers"
       ]
     },
+    "BufferIdentifier": {
+      "description": "Uniquely identify a buffer within a buffer map, either by name or by an\n index value.",
+      "anyOf": [
+        {
+          "description": "Identify a buffer by name",
+          "type": "string"
+        },
+        {
+          "description": "Identify a buffer by an index value",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      ]
+    },
     "BufferSchema": {
       "description": "Create a [`Buffer`][1] which can be used to store and pull data within\n a scope.\n\n By default the [`BufferSettings`][2] will keep the single last message\n pushed to the buffer. You can change that with the optional `settings`\n property.\n\n Use the `\"serialize\": true` option to serialize the messages into\n [`JsonMessage`] before they are inserted into the buffer. This\n allows any serializable message type to be pushed into the buffer. If\n left unspecified, the buffer will store the specific data type that gets\n pushed into it. If the buffer inputs are not being serialized, then all\n incoming messages being pushed into the buffer must have the same type.\n\n [1]: crate::Buffer\n [2]: crate::BufferSettings\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"fork_clone\",\n     \"ops\": {\n         \"fork_clone\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"num_output\", \"string_output\", \"all_num_buffer\", \"serialized_num_buffer\"]\n         },\n         \"num_output\": {\n             \"type\": \"node\",\n             \"builder\": \"num_output\",\n             \"next\": \"buffer_access\"\n         },\n         \"string_output\": {\n             \"type\": \"node\",\n             \"builder\": \"string_output\",\n             \"next\": \"string_buffer\"\n         },\n         \"string_buffer\": {\n             \"type\": \"buffer\",\n             \"settings\": {\n                 \"retention\": { \"keep_last\": 10 }\n             }\n         },\n         \"all_num_buffer\": {\n             \"type\": \"buffer\",\n             \"settings\": {\n                 \"retention\": \"keep_all\"\n             }\n         },\n         \"serialized_num_buffer\": {\n             \"type\": \"buffer\",\n             \"serialize\": true\n         },\n         \"buffer_access\": {\n             \"type\": \"buffer_access\",\n             \"buffers\": [\"string_buffer\"],\n             \"next\": \"with_buffer_access\"\n         },\n         \"with_buffer_access\": {\n             \"type\": \"node\",\n             \"builder\": \"with_buffer_access\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
       "type": "object",
@@ -449,8 +464,20 @@
           "description": "Map of buffer keys and buffers.",
           "$ref": "#/$defs/BufferSelection"
         },
+        "clone": {
+          "description": "List of the keys in the `buffers` dictionary whose value should be cloned\n instead of removed from the buffer (pulled) when the join occurs. Cloning\n the value will leave the buffer unchanged after the join operation takes\n place.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BufferIdentifier"
+          }
+        },
         "next": {
+          "description": "The operation that the joined value will be passed to.",
           "$ref": "#/$defs/NextOperation"
+        },
+        "serialize": {
+          "description": "Whether or not to automatically serialize the inputs into a single JsonMessage.\n This will only work if all input types are serializable, otherwise you will\n get a [`DiagramError`][super::DiagramError].",
+          "type": "boolean"
         }
       },
       "required": [

@@ -125,10 +125,10 @@ where
         });
 
         registry.register_serialize::<T, S>();
-        registry.register_fork_clone::<T, C>();
+        registry.register_clone::<T, C>();
 
         registry.register_serialize::<E, S>();
-        registry.register_fork_clone::<E, C>();
+        registry.register_clone::<E, C>();
 
         true
     }
@@ -161,7 +161,7 @@ mod tests {
                 NodeBuilderOptions::new("check_even".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
             )
-            .with_fork_result();
+            .with_result();
 
         fn echo(s: String) -> String {
             s

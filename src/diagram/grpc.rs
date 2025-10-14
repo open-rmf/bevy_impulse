@@ -162,7 +162,7 @@ impl DiagramElementRegistry {
                 Ok(node)
             },
         )
-        .with_fork_result();
+        .with_result();
 
         let rt = runtime;
         self.opt_out()
@@ -220,7 +220,7 @@ impl DiagramElementRegistry {
                     Ok(node)
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         // TODO(@mxgrey): Support dynamic gRPC requests whose configurations are
         // decided within the workflow and passed into the node as input.

@@ -213,7 +213,7 @@ mod tests {
                     })
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         fixture
             .registry

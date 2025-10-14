@@ -18,7 +18,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Builder, ForkCloneOutput};
+use crate::{Builder, CloneFromBuffer, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
@@ -133,6 +133,9 @@ where
     const CLONEABLE: bool = true;
 
     fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
+        // Make sure to register that this type can be cloned from buffers.
+        CloneFromBuffer::<T>::register_clone_for_join();
+
         let (input, outputs) = builder.create_fork_clone::<T>();
 
         Ok(DynForkClone {

@@ -175,7 +175,7 @@ macro_rules! dyn_unzip_impl {
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
                     registry.register_serialize::<$P, Serializer>();
-                    registry.register_fork_clone::<$P, Cloneable>();
+                    registry.register_clone::<$P, Cloneable>();
                 )*
             }
         }

@@ -30,6 +30,14 @@ pub trait InspectBuffer {
         session: Entity,
     ) -> Result<usize, OperationError>;
 
+    fn clone_from_buffer<T: 'static + Send + Sync + Clone>(
+        &self,
+        session: Entity,
+    ) -> Result<T, OperationError> {
+        self.try_clone_from_buffer(session)
+            .and_then(|r| r.or_broken())
+    }
+
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
         &self,
         session: Entity,

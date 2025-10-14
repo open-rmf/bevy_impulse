@@ -23,6 +23,7 @@ use super::{
     BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     JsonMessage, NextOperation, OperationName,
 };
+use crate::{default_as_false, is_default, is_false, BufferIdentifier};
 
 /// Wait for exactly one item to be available in each buffer listed in
 /// `buffers`, then join each of those items into a single output message
@@ -81,10 +82,24 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct JoinSchema {
-    pub(super) next: NextOperation,
+    /// The operation that the joined value will be passed to.
+    pub next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferSelection,
+    pub buffers: BufferSelection,
+
+    /// List of the keys in the `buffers` dictionary whose value should be cloned
+    /// instead of removed from the buffer (pulled) when the join occurs. Cloning
+    /// the value will leave the buffer unchanged after the join operation takes
+    /// place.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub clone: Vec<BufferIdentifier<'static>>,
+
+    /// Whether or not to automatically serialize the inputs into a single JsonMessage.
+    /// This will only work if all input types are serializable, otherwise you will
+    /// get a [`DiagramError`][super::DiagramError].
+    #[serde(default = "default_as_false", skip_serializing_if = "is_false")]
+    pub serialize: bool,
 }
 
 impl BuildDiagramOperation for JoinSchema {
@@ -97,22 +112,40 @@ impl BuildDiagramOperation for JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
-            return Ok(BuildStatus::defer(
-                "waiting to find out target message type",
-            ));
-        };
-
-        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
+        let mut buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let output = ctx
-            .registry
-            .messages
-            .join(&target_type, &buffer_map, ctx.builder)?;
-        ctx.add_output_into_target(&self.next, output);
+        for to_clone in &self.clone {
+            let Some(buffer) = buffer_map.get_mut(to_clone) else {
+                return Err(DiagramErrorCode::UnknownJoinField {
+                    unknown: to_clone.clone(),
+                    available: buffer_map.keys().cloned().collect(),
+                });
+            };
+
+            *buffer = (*buffer)
+                .join_by_cloning()
+                .ok_or_else(|| DiagramErrorCode::NotCloneable(buffer.message_type()))?;
+        }
+
+        if self.serialize {
+            let output = ctx.builder.try_join::<JsonMessage>(&buffer_map)?.output();
+            ctx.add_output_into_target(&self.next, output.into());
+        } else {
+            let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+                return Ok(BuildStatus::defer(
+                    "waiting to find out target message type",
+                ));
+            };
+
+            let output = ctx
+                .registry
+                .messages
+                .join(&target_type, &buffer_map, ctx.builder)?;
+            ctx.add_output_into_target(&self.next, output);
+        }
         Ok(BuildStatus::Finished)
     }
 }

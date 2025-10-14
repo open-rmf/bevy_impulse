@@ -44,6 +44,20 @@ pub(crate) fn is_true(value: &bool) -> bool {
     *value
 }
 
+/// This is effectively the same as just using #[serde(default)], but not everyone
+/// knows that false is the "default" value of a boolean, so this lets us be explicit.
+#[allow(unused)]
+pub(crate) fn default_as_false() -> bool {
+    false
+}
+
+/// Effectively the same as just using #[serde(skip_serializing_if = "is_default")]
+/// but it allows us to be more explicit.
+#[allow(unused)]
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// This is used to block a future from ever returning. This should only be used
 /// in a race to force one of the contesting futures to lose. Make sure that at
 /// least one contesting future will finish or else this will lead to a deadlock.
