@@ -23,6 +23,7 @@ use crate::{Builder, CloneFromBuffer, ForkCloneOutput};
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
+    MessageOperation,
 };
 
 /// If the request is cloneable, clone it into multiple responses that can
@@ -112,36 +113,36 @@ impl BuildDiagramOperation for ForkCloneSchema {
     }
 }
 
-pub trait PerformForkClone<T> {
+pub trait RegisterClone<T> {
     const CLONEABLE: bool;
 
-    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
+    fn register_clone(ops: &mut MessageOperation);
 }
 
-impl<T: 'static> PerformForkClone<T> for NotSupported {
+impl<T: 'static> RegisterClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
-    fn perform_fork_clone(_builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotCloneable(TypeInfo::of::<T>()))
+    fn register_clone(ops: &mut MessageOperation) {
+        ops.fork_clone_impl = Some(|_| Err(DiagramErrorCode::NotCloneable(TypeInfo::of::<T>())));
     }
 }
 
-impl<T> PerformForkClone<T> for Supported
+impl<T> RegisterClone<T> for Supported
 where
     T: Send + Sync + 'static + Clone,
 {
     const CLONEABLE: bool = true;
 
-    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
-        // Make sure to register that this type can be cloned from buffers.
+    fn register_clone(ops: &mut MessageOperation) {
         CloneFromBuffer::<T>::register_clone_for_join();
+        ops.fork_clone_impl = Some(|builder| {
+            let (input, outputs) = builder.create_fork_clone::<T>();
 
-        let (input, outputs) = builder.create_fork_clone::<T>();
-
-        Ok(DynForkClone {
-            input: input.into(),
-            outputs: DynForkCloneOutput::new(outputs),
-        })
+            Ok(DynForkClone {
+                input: input.into(),
+                outputs: DynForkCloneOutput::new(outputs),
+            })
+        });
     }
 }
 

@@ -23,7 +23,7 @@ use crate::Builder;
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationName, PerformForkClone,
+    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationName, RegisterClone,
     SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
@@ -144,7 +144,7 @@ macro_rules! dyn_unzip_impl {
         where
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
-            Cloneable: $(PerformForkClone<$P> +)* $(PerformForkClone<Vec<$P>> +)*,
+            Cloneable: $(RegisterClone<$P> +)* $(RegisterClone<Vec<$P>> +)*,
         {
             fn output_types(&self) -> Vec<TypeInfo> {
                 vec![$(

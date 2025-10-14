@@ -24,8 +24,9 @@ use bevy_ecs::{
 
 use std::{
     any::TypeId,
+    collections::HashMap,
     ops::RangeBounds,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use thiserror::Error as ThisError;
@@ -182,8 +183,13 @@ impl<T: Clone + Send + Sync + 'static> CloneFromBuffer<T> {
     /// [`CloneFromBuffer`] and that it can correctly transfer any Cloning join
     /// behavior if it gets downcast to a [`FetchFromBuffer`].
     pub fn register_clone_for_join() {
-        static REGISTER_CLONE: OnceLock<()> = OnceLock::new();
-        REGISTER_CLONE.get_or_init(|| {
+        static REGISTER_CLONE: OnceLock<Mutex<HashMap<TypeId, ()>>> = OnceLock::new();
+        let register_clone = REGISTER_CLONE.get_or_init(|| Mutex::default());
+
+        // TODO(@mxgrey): Consider whether there is a way to avoid needing all
+        // these mutex locks and hashmap lookups every time we create a CloneFromBuffer.
+        let mut register_mut = register_clone.lock().unwrap();
+        register_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
             let interface = AnyBuffer::interface_for::<T>();
             interface.register_cloning(
                 clone_for_any_join::<T>,

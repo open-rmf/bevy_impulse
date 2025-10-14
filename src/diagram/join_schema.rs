@@ -618,4 +618,79 @@ mod tests {
         assert_eq!(object["foobar_2"].as_object().unwrap()["foo"], "foo_2");
         assert_eq!(object["foobar_2"].as_object().unwrap()["bar"], "bar_2");
     }
+
+    #[test]
+    fn test_diagram_join_by_clone() {
+        let mut fixture = DiagramTestFixture::new();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("check"),
+            |builder, config: i64| {
+                builder.create_map_block(move |joined: JoinByCloneTest| {
+                    if joined.count < config {
+                        Err(joined.count + 1)
+                    } else {
+                        Ok(joined)
+                    }
+                })
+            }
+        )
+            .with_join()
+            .with_result();
+
+        fixture.registry.register_message::<(String, i64)>().with_unzip();
+
+        // The diagram has a loop with a join of two buffers. One of the joined
+        // bufffers gets cloned each time while the other gets pulled. We keep
+        // refreshing the pulled buffer until its value reaches 10. We expect
+        // the cloned value to keep being available over and over without putting
+        // any new value inside of it because we are cloning from it instead of
+        // pulling.
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "unzip",
+            "ops": {
+                "unzip": {
+                    "type": "unzip",
+                    "next": [
+                        "message_buffer",
+                        "count_buffer"
+                    ]
+                },
+                "message_buffer": { "type": "buffer" },
+                "count_buffer": { "type": "buffer" },
+                "join": {
+                    "type": "join",
+                    "buffers": {
+                        "count": "count_buffer",
+                        "message": "message_buffer"
+                    },
+                    "clone": [ "message" ],
+                    "next": "check"
+                },
+                "check": {
+                    "type": "node",
+                    "builder": "check",
+                    "config": 10,
+                    "next": "fork_result"
+                },
+                "fork_result": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": "count_buffer"
+                }
+            }
+        }))
+        .unwrap();
+
+        let input = (String::from("hello"), 0_i64);
+        let result: JoinByCloneTest = fixture.spawn_and_run(&diagram, input).unwrap();
+        assert_eq!(result.count, 10);
+        assert_eq!(result.message, "hello");
+    }
+
+    #[derive(Joined, Clone, Serialize, Deserialize, JsonSchema)]
+    struct JoinByCloneTest {
+        count: i64,
+        message: String,
+    }
 }

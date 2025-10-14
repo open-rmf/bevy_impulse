@@ -44,7 +44,7 @@ use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
-    buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
+    buffer_schema::BufferAccessRequest, fork_clone_schema::RegisterClone,
     fork_result_schema::RegisterForkResult, register_json, supported::*,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
@@ -173,8 +173,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         DeserializeImpl: DeserializeMessage<Response>,
         SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        Cloneable: PerformForkClone<Request>,
-        Cloneable: PerformForkClone<Response>,
+        Cloneable: RegisterClone<Request>,
+        Cloneable: RegisterClone<Response>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
@@ -211,8 +211,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         DeserializeImpl: DeserializeMessage<Response>,
         SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        Cloneable: PerformForkClone<Request>,
-        Cloneable: PerformForkClone<Response>,
+        Cloneable: RegisterClone<Request>,
+        Cloneable: RegisterClone<Response>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
@@ -259,7 +259,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: PerformForkClone<Message>,
+        Cloneable: RegisterClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.impl_register_message();
@@ -271,7 +271,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: PerformForkClone<Message>,
+        Cloneable: RegisterClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.registry
@@ -723,7 +723,7 @@ pub struct DiagramElementRegistry {
     pub(super) messages: MessageRegistry,
 }
 
-pub(super) struct MessageOperation {
+pub struct MessageOperation {
     pub(super) deserialize_impl: Option<DeserializeFn>,
     pub(super) serialize_impl: Option<SerializeFn>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
@@ -1007,7 +1007,7 @@ impl MessageRegistry {
     pub(super) fn register_clone<T, F>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        F: PerformForkClone<T>,
+        F: RegisterClone<T>,
     {
         let ops = &mut self
             .messages
@@ -1018,7 +1018,7 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.fork_clone_impl = Some(|builder| F::perform_fork_clone(builder));
+        F::register_clone(ops);
 
         true
     }

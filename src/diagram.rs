@@ -41,7 +41,7 @@ pub mod zenoh;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
+use fork_clone_schema::{DynForkClone, ForkCloneSchema, RegisterClone};
 use fork_result_schema::{DynForkResult, ForkResultSchema};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
