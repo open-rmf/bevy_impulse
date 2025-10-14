@@ -44,7 +44,7 @@ use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
-    buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
+    buffer_schema::BufferAccessRequest, fork_clone_schema::RegisterClone,
     fork_result_schema::RegisterForkResult, register_json, supported::*,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
@@ -173,8 +173,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         DeserializeImpl: DeserializeMessage<Response>,
         SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        Cloneable: PerformForkClone<Request>,
-        Cloneable: PerformForkClone<Response>,
+        Cloneable: RegisterClone<Request>,
+        Cloneable: RegisterClone<Response>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
@@ -211,8 +211,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         DeserializeImpl: DeserializeMessage<Response>,
         SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        Cloneable: PerformForkClone<Request>,
-        Cloneable: PerformForkClone<Response>,
+        Cloneable: RegisterClone<Request>,
+        Cloneable: RegisterClone<Response>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
@@ -259,7 +259,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: PerformForkClone<Message>,
+        Cloneable: RegisterClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.impl_register_message();
@@ -271,7 +271,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: PerformForkClone<Message>,
+        Cloneable: RegisterClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.registry
@@ -282,7 +282,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
             .register_serialize::<Message, SerializeImpl>();
         self.registry
             .messages
-            .register_fork_clone::<Message, Cloneable>();
+            .register_clone::<Message, Cloneable>();
 
         register_json::<Message, SerializeImpl, DeserializeImpl>();
     }
@@ -371,23 +371,23 @@ where
 
     /// Mark the message as having a [`Result<_, _>`] response. This is required in order for the node
     /// to be able to be connected to a "Fork Result" operation.
-    pub fn with_fork_result(&mut self) -> &mut Self
+    pub fn with_result(&mut self) -> &mut Self
     where
         Supported<(Message, Supported, Supported)>: RegisterForkResult,
     {
         self.data
-            .register_fork_result::<Supported<(Message, Supported, Supported)>>();
+            .register_result::<Supported<(Message, Supported, Supported)>>();
         self
     }
 
-    /// Same as `Self::with_fork_result` but it will not register serialization
+    /// Same as `Self::with_result` but it will not register serialization
     /// or cloning for the [`Ok`] or [`Err`] variants of the message.
-    pub fn with_fork_result_minimal(&mut self) -> &mut Self
+    pub fn with_result_minimal(&mut self) -> &mut Self
     where
         Supported<(Message, NotSupported, NotSupported)>: RegisterForkResult,
     {
         self.data
-            .register_fork_result::<Supported<(Message, NotSupported, NotSupported)>>();
+            .register_result::<Supported<(Message, NotSupported, NotSupported)>>();
         self
     }
 
@@ -484,7 +484,7 @@ where
     {
         self.registry
             .messages
-            .register_fork_clone::<Request, Supported>();
+            .register_clone::<Request, Supported>();
         self
     }
 
@@ -519,7 +519,7 @@ where
     {
         self.registry
             .messages
-            .register_fork_clone::<Response, Supported>();
+            .register_clone::<Response, Supported>();
         self
     }
 
@@ -556,21 +556,21 @@ where
 
     /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
     /// to be able to be connected to a "Fork Result" operation.
-    pub fn with_fork_result(&mut self) -> &mut Self
+    pub fn with_result(&mut self) -> &mut Self
     where
         Supported<(Response, Supported, Supported)>: RegisterForkResult,
     {
-        MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_result();
         self
     }
 
-    /// Same as `Self::with_fork_result` but it will not register serialization
+    /// Same as `Self::with_result` but it will not register serialization
     /// or cloning for the [`Ok`] or [`Err`] variants of the message.
-    pub fn with_fork_result_minimal(&mut self) -> &mut Self
+    pub fn with_result_minimal(&mut self) -> &mut Self
     where
         Supported<(Response, NotSupported, NotSupported)>: RegisterForkResult,
     {
-        MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result_minimal();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_result_minimal();
         self
     }
 
@@ -723,7 +723,7 @@ pub struct DiagramElementRegistry {
     pub(super) messages: MessageRegistry,
 }
 
-pub(super) struct MessageOperation {
+pub struct MessageOperation {
     pub(super) deserialize_impl: Option<DeserializeFn>,
     pub(super) serialize_impl: Option<SerializeFn>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
@@ -1004,10 +1004,10 @@ impl MessageRegistry {
 
     /// Register a fork_clone function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_fork_clone<T, F>(&mut self) -> bool
+    pub(super) fn register_clone<T, F>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        F: PerformForkClone<T>,
+        F: RegisterClone<T>,
     {
         let ops = &mut self
             .messages
@@ -1018,7 +1018,7 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.fork_clone_impl = Some(|builder| F::perform_fork_clone(builder));
+        F::register_clone(ops);
 
         true
     }
@@ -1073,7 +1073,7 @@ impl MessageRegistry {
 
     /// Register a fork_result function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_fork_result<R>(&mut self) -> bool
+    pub(super) fn register_result<R>(&mut self) -> bool
     where
         R: RegisterForkResult,
     {

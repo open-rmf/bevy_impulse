@@ -60,7 +60,11 @@ pub trait Buffering: 'static + Send + Sync + Clone {
 
 pub trait Joining: Buffering {
     type Item: 'static + Send + Sync;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError>;
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError>;
 
     /// Join these bufferable workflow elements. Each time every buffer contains
     /// at least one element, this will pull the oldest element from each buffer
@@ -267,7 +271,11 @@ impl<T: 'static + Send + Sync> Buffering for Buffer<T> {
 
 impl<T: 'static + Send + Sync> Joining for Buffer<T> {
     type Item = T;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         world
             .get_entity_mut(self.id())
             .or_broken()?
@@ -351,7 +359,11 @@ impl<T: 'static + Send + Sync + Clone> Buffering for CloneFromBuffer<T> {
 
 impl<T: 'static + Send + Sync + Clone> Joining for CloneFromBuffer<T> {
     type Item = T;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         world
             .get_entity(self.id())
             .or_broken()?
@@ -474,14 +486,14 @@ macro_rules! impl_buffered_for_tuple {
         impl<$($T: Joining),*> Joining for ($($T,)*)
         {
             type Item = ($($T::Item),*);
-            fn pull(
+            fn fetch_for_join(
                 &self,
                 session: Entity,
                 world: &mut World,
             ) -> Result<Self::Item, OperationError> {
                 let ($($T,)*) = self;
                 Ok(($(
-                    $T.pull(session, world)?,
+                    $T.fetch_for_join(session, world)?,
                 )*))
             }
         }
@@ -606,9 +618,13 @@ impl<T: Joining, const N: usize> Joining for [T; N] {
     // TODO(@mxgrey) We may be able to use [T::Item; N] here instead of SmallVec
     // when try_map is stabilized: https://github.com/rust-lang/rust/issues/79711
     type Item = SmallVec<[T::Item; N]>;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         self.iter()
-            .map(|buffer| buffer.pull(session, world))
+            .map(|buffer| buffer.fetch_for_join(session, world))
             .collect()
     }
 }
@@ -720,9 +736,13 @@ impl<T: Buffering, const N: usize> Buffering for SmallVec<[T; N]> {
 
 impl<T: Joining, const N: usize> Joining for SmallVec<[T; N]> {
     type Item = SmallVec<[T::Item; N]>;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         self.iter()
-            .map(|buffer| buffer.pull(session, world))
+            .map(|buffer| buffer.fetch_for_join(session, world))
             .collect()
     }
 }
@@ -834,9 +854,13 @@ impl<B: Buffering> Buffering for Vec<B> {
 
 impl<B: Joining> Joining for Vec<B> {
     type Item = Vec<B::Item>;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         self.iter()
-            .map(|buffer| buffer.pull(session, world))
+            .map(|buffer| buffer.fetch_for_join(session, world))
             .collect()
     }
 }

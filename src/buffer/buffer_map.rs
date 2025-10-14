@@ -31,16 +31,36 @@ use crate::{
 
 pub use bevy_impulse_derive::{Accessor, Joined};
 
+#[cfg(feature = "diagram")]
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "diagram")]
+use schemars::JsonSchema;
+
 use super::BufferKey;
 
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(Serialize, Deserialize, JsonSchema),
+    serde(untagged)
+)]
 pub enum BufferIdentifier<'a> {
     /// Identify a buffer by name
     Name(Cow<'a, str>),
     /// Identify a buffer by an index value
     Index(usize),
+}
+
+impl<'a> std::fmt::Display for BufferIdentifier<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Name(name) => write!(f, "\"{name}\""),
+            Self::Index(index) => write!(f, "#{index}"),
+        }
+    }
 }
 
 impl BufferIdentifier<'static> {
@@ -153,8 +173,8 @@ impl IncompatibleLayout {
             } else {
                 self.incompatible_buffers.push(BufferIncompatibility {
                     identifier,
-                    expected: std::any::type_name::<BufferType>(),
-                    received: buffer.message_type_name(),
+                    expected_buffer: std::any::type_name::<BufferType>(),
+                    received_message_type: buffer.message_type_name(),
                 });
             }
         } else {
@@ -179,8 +199,8 @@ impl IncompatibleLayout {
             } else {
                 self.incompatible_buffers.push(BufferIncompatibility {
                     identifier: BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())),
-                    expected: std::any::type_name::<BufferType>(),
-                    received: buffer.message_type_name(),
+                    expected_buffer: std::any::type_name::<BufferType>(),
+                    received_message_type: buffer.message_type_name(),
                 });
             }
         } else {
@@ -198,9 +218,9 @@ pub struct BufferIncompatibility {
     /// Name of the expected buffer
     pub identifier: BufferIdentifier<'static>,
     /// The type that was expected for this buffer
-    pub expected: &'static str,
+    pub expected_buffer: &'static str,
     /// The type that was received for this buffer
-    pub received: &'static str,
+    pub received_message_type: &'static str,
     // TODO(@mxgrey): Replace TypeId with TypeInfo
 }
 
@@ -472,10 +492,14 @@ impl BufferMapStruct for BufferMap {
 impl Joining for BufferMap {
     type Item = HashMap<BufferIdentifier<'static>, AnyMessageBox>;
 
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         let mut value = HashMap::new();
         for (name, buffer) in self.iter() {
-            value.insert(name.clone(), buffer.pull(session, world)?);
+            value.insert(name.clone(), buffer.fetch_for_join(session, world)?);
         }
 
         Ok(value)
@@ -667,7 +691,7 @@ mod tests {
                 buffer_f64,
                 buffer_string,
                 buffer_generic,
-                buffer_any.into(),
+                buffer_any,
             );
 
             builder.join(buffers).connect(scope.terminate);
@@ -723,7 +747,7 @@ mod tests {
             |scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
                 let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
                     a: builder.create_buffer(BufferSettings::default()),
-                    b: builder.create_buffer(BufferSettings::default()),
+                    b: builder.create_buffer(BufferSettings::default()).into(),
                 };
 
                 let copy = multi_generic_buffers;

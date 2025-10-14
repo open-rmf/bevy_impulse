@@ -29,7 +29,7 @@ use crate::{
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
-    PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
+    RegisterClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 /// If the input message is a list-like or map-like object, split it into
@@ -266,7 +266,7 @@ where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
     Serializer: SerializeMessage<T::Item> + SerializeMessage<Vec<T::Item>>,
-    Cloneable: PerformForkClone<T::Item> + PerformForkClone<Vec<T::Item>>,
+    Cloneable: RegisterClone<T::Item> + RegisterClone<Vec<T::Item>>,
 {
     fn perform_split(
         split_op: &SplitSchema,
@@ -303,9 +303,9 @@ where
         ops.split_impl = Some(Self::perform_split);
 
         registry.register_serialize::<T::Item, Serializer>();
-        registry.register_fork_clone::<T::Item, Cloneable>();
+        registry.register_clone::<T::Item, Cloneable>();
         registry.register_serialize::<Vec<T::Item>, Serializer>();
-        registry.register_fork_clone::<Vec<T::Item>, Cloneable>();
+        registry.register_clone::<Vec<T::Item>, Cloneable>();
     }
 }
 

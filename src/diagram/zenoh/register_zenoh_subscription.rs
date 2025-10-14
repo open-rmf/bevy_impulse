@@ -254,6 +254,6 @@ impl DiagramElementRegistry {
                 })
             },
         )
-        .with_fork_result();
+        .with_result();
     }
 }

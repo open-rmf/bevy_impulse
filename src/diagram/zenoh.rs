@@ -442,7 +442,7 @@ mod tests {
                 },
             )
             .with_listen()
-            .with_fork_result();
+            .with_result();
 
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("slow_spread"),

@@ -380,7 +380,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
                 })
             },
         )
-        .with_fork_result_minimal()
+        .with_result_minimal()
         .with_deserialize_request();
 
     let less_than_description = "Compares for a less-than relationship, \
@@ -424,7 +424,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
                 })
             },
         )
-        .with_fork_result();
+        .with_result();
 
     let greater_than_description = "Compares for a greater-than relationship, \
         returning a Result<Msg> based on the evaluation. Inputs can be an \
@@ -467,7 +467,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
                 })
             },
         )
-        .with_fork_result();
+        .with_result();
 }
 
 #[cfg(test)]

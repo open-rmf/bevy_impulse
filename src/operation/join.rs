@@ -77,7 +77,7 @@ where
             return Err(OperationError::NotReady);
         }
 
-        let output = buffers.pull(session, world)?;
+        let output = buffers.fetch_for_join(session, world)?;
         world
             .get_entity_mut(target)
             .or_broken()?

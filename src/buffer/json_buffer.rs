@@ -39,9 +39,9 @@ use crate::{
     add_listener_to_source, Accessing, Accessor, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey,
     AnyRange, AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
     BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferMap,
-    BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffering, Builder, DrainBuffer,
-    Gate, GateState, IncompatibleLayout, InspectBuffer, Joined, Joining, ManageBuffer,
-    NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
+    BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffering, Builder,
+    CloneFromBuffer, DrainBuffer, Gate, GateState, IncompatibleLayout, InspectBuffer, JoinBehavior,
+    Joined, Joining, ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -50,6 +50,7 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub struct JsonBuffer {
     location: BufferLocation,
+    join_behavior: JoinBehavior,
     interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
 }
 
@@ -71,6 +72,35 @@ impl JsonBuffer {
     /// Downcast this into a different specialized buffer representation.
     pub fn downcast_buffer<BufferType: 'static>(&self) -> Option<BufferType> {
         self.as_any_buffer().downcast_buffer::<BufferType>()
+    }
+
+    /// Specify that you want this JsonBuffer to join by cloning an element. This
+    /// can be used by operations like join to tell them that they should clone
+    /// from the buffer instead of consuming from it.
+    #[must_use]
+    pub fn join_by_cloning(self) -> Self {
+        Self {
+            join_behavior: JoinBehavior::Clone,
+            ..self
+        }
+    }
+
+    /// Specify that you want this JsonBuffer to join by pulling an element. This
+    /// is the default behavior of a Buffer, so you don't generally need to call
+    /// this method, but you can use it to change from the join-by-cloning
+    /// setting back to join-by-pulling.
+    #[must_use]
+    pub fn join_by_pulling(self) -> Self {
+        Self {
+            join_behavior: JoinBehavior::Pull,
+            ..self
+        }
+    }
+
+    /// What is the intended join behavior for this buffer reference?
+    #[must_use]
+    pub fn join_behavior(&self) -> JoinBehavior {
+        self.join_behavior
     }
 
     /// Register the ability to cast into [`JsonBuffer`] and [`JsonBufferKey`]
@@ -109,6 +139,19 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<Buffer<T>> fo
     fn from(value: Buffer<T>) -> Self {
         Self {
             location: value.location,
+            join_behavior: JoinBehavior::Pull,
+            interface: JsonBufferAccessImpl::<T>::get_interface(),
+        }
+    }
+}
+
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned + Clone> From<CloneFromBuffer<T>>
+    for JsonBuffer
+{
+    fn from(value: CloneFromBuffer<T>) -> Self {
+        Self {
+            location: value.location,
+            join_behavior: JoinBehavior::Clone,
             interface: JsonBufferAccessImpl::<T>::get_interface(),
         }
     }
@@ -118,6 +161,7 @@ impl From<JsonBuffer> for AnyBuffer {
     fn from(value: JsonBuffer) -> Self {
         Self {
             location: value.location,
+            join_behavior: value.join_behavior,
             interface: value.interface.any_access_interface(),
         }
     }
@@ -787,6 +831,12 @@ trait JsonBufferAccessInterface {
         session: Entity,
     ) -> Result<JsonMessage, OperationError>;
 
+    fn clone_from_buffer(
+        &self,
+        buffer_ref: &EntityRef,
+        session: Entity,
+    ) -> Result<JsonMessage, OperationError>;
+
     fn create_json_buffer_view<'a>(
         &self,
         key: &JsonBufferKey,
@@ -834,11 +884,12 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
             let any_interface = AnyBuffer::interface_for::<T>();
             any_interface.register_buffer_downcast(
                 TypeId::of::<JsonBuffer>(),
-                Box::new(|location| {
-                    Box::new(JsonBuffer {
-                        location,
+                Box::new(|buffer: AnyBuffer| {
+                    Ok(Box::new(JsonBuffer {
+                        location: buffer.location,
+                        join_behavior: buffer.join_behavior,
                         interface: Self::get_interface(),
-                    })
+                    }))
                 }),
             );
 
@@ -907,6 +958,20 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         session: Entity,
     ) -> Result<JsonMessage, OperationError> {
         let value = buffer_mut.pull_from_buffer::<T>(session)?;
+        serde_json::to_value(value).or_broken()
+    }
+
+    fn clone_from_buffer(
+        &self,
+        buffer_ref: &EntityRef,
+        session: Entity,
+    ) -> Result<JsonMessage, OperationError> {
+        let value = buffer_ref
+            .get::<BufferStorage<T>>()
+            .or_broken()?
+            .newest(session)
+            .or_broken()?;
+
         serde_json::to_value(value).or_broken()
     }
 
@@ -1067,9 +1132,21 @@ impl Buffering for JsonBuffer {
 
 impl Joining for JsonBuffer {
     type Item = JsonMessage;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
-        self.interface.pull(&mut buffer_mut, session)
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
+        match self.join_behavior {
+            JoinBehavior::Pull => {
+                let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
+                self.interface.pull(&mut buffer_mut, session)
+            }
+            JoinBehavior::Clone => {
+                let buffer_ref = world.get_entity(self.id()).or_broken()?;
+                self.interface.clone_from_buffer(&buffer_ref, session)
+            }
+        }
     }
 }
 
@@ -1155,9 +1232,17 @@ impl BufferMapStruct for HashMap<String, JsonBuffer> {
 
 impl Joining for HashMap<String, JsonBuffer> {
     type Item = serde_json::Map<String, JsonMessage>;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         self.iter()
-            .map(|(key, value)| value.pull(session, world).map(|v| (key.clone(), v)))
+            .map(|(key, value)| {
+                value
+                    .fetch_for_join(session, world)
+                    .map(|v| (key.clone(), v))
+            })
             .collect()
     }
 }
@@ -1191,7 +1276,11 @@ impl BufferMapStruct for HashMap<BufferIdentifier<'static>, JsonBuffer> {
 
 impl Joining for HashMap<BufferIdentifier<'static>, JsonBuffer> {
     type Item = JsonMessage;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         let mut object = serde_json::Map::<String, JsonMessage>::new();
         let mut array = Vec::<JsonMessage>::new();
 
@@ -1204,10 +1293,13 @@ impl Joining for HashMap<BufferIdentifier<'static>, JsonBuffer> {
                         array.resize(*index + 1, JsonMessage::Null);
                     }
 
-                    array[*index] = buffer.pull(session, world)?;
+                    array[*index] = buffer.fetch_for_join(session, world)?;
                 }
                 BufferIdentifier::Name(name) => {
-                    object.insert(name.as_ref().to_owned(), buffer.pull(session, world)?);
+                    object.insert(
+                        name.as_ref().to_owned(),
+                        buffer.fetch_for_join(session, world)?,
+                    );
                 }
             }
         }
@@ -1605,8 +1697,8 @@ mod tests {
 
             let json_buffer = builder.create_buffer::<TestMessage>(BufferSettings::default());
             let buffers = TestJoinedValueJsonBuffers {
-                integer: builder.create_buffer(BufferSettings::default()),
-                float: builder.create_buffer(BufferSettings::default()),
+                integer: builder.create_buffer(BufferSettings::default()).into(),
+                float: builder.create_buffer(BufferSettings::default()).into(),
                 json: json_buffer.into(),
             };
 
