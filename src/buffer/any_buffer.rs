@@ -19,7 +19,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     ops::RangeBounds,
     sync::{Mutex, OnceLock},
 };
@@ -39,7 +39,7 @@ use crate::{
     BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder, CloneFromBuffer,
     DrainBuffer, FetchFromBuffer, Gate, GateState, IncompatibleLayout, InspectBuffer, Joining,
     ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
-    TypeInfo,
+    TypeInfo, MessageTypeHint, BufferIdentifier, MessageTypeHintEvaluation, MessageTypeHintMap,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -197,11 +197,18 @@ pub enum JoinBehavior {
 pub trait AsAnyBuffer {
     /// Convert this buffer into an [`AnyBuffer`].
     fn as_any_buffer(&self) -> AnyBuffer;
+
+    /// What would be the message type hint for this kind of buffer?
+    fn message_type_hint() -> MessageTypeHint;
 }
 
 impl AsAnyBuffer for AnyBuffer {
     fn as_any_buffer(&self) -> AnyBuffer {
         *self
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::fallback::<AnyMessageBox>()
     }
 }
 
@@ -209,11 +216,19 @@ impl<T: 'static + Send + Sync> AsAnyBuffer for Buffer<T> {
     fn as_any_buffer(&self) -> AnyBuffer {
         (*self).into()
     }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::exact::<T>()
+    }
 }
 
 impl<T: 'static + Send + Sync + Clone> AsAnyBuffer for CloneFromBuffer<T> {
     fn as_any_buffer(&self) -> AnyBuffer {
         (*self).into()
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::exact::<T>()
     }
 }
 
@@ -320,6 +335,14 @@ impl BufferMapLayout for AnyBuffer {
         }
 
         Err(compatibility)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        evaluation.fallback::<AnyMessageBox>(0);
+        evaluation.evaluate()
     }
 }
 

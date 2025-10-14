@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder,
-    BuilderScopeContext, JsonMessage, Scope, StreamPack,
+    BuilderScopeContext, JsonMessage, Scope, StreamPack, MessageTypeHint, MessageTypeHintMap,
 };
 
 #[cfg(feature = "trace")]
@@ -33,7 +33,7 @@ use super::{
     BufferSelection, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot,
     DynOutput, FinishingErrors, ImplicitDeserialization, ImplicitSerialization, ImplicitStringify,
     NamedOperationRef, NamespaceList, NextOperation, OperationName, OperationRef, Operations,
-    StreamOutRef, Templates, TraceToggle, TypeInfo,
+    StreamOutRef, Templates, TraceToggle, TypeInfo, MessageRegistry,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -48,6 +48,8 @@ struct DiagramConstruction {
     outputs_into_target: HashMap<OperationRef, Vec<DynOutput>>,
     /// A map of what buffers exist in the diagram
     buffers: HashMap<OperationRef, BufferRef>,
+    /// A map of type hints for each buffer, provided by listeners and accessors
+    buffer_hints: HashMap<OperationRef, HashSet<MessageTypeHint>>,
     /// Operations that were spawned by another operation.
     generated_operations: Vec<UnfinishedOperation>,
 }
@@ -136,6 +138,32 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
             .and_then(|outputs| outputs.first())
             .map(|o| *o.message_info());
         Ok(infer)
+    }
+
+    pub fn infer_buffer_message_type_from_hints(
+        &self,
+        id: impl Into<OperationRef>,
+    ) -> Result<Option<TypeInfo>, DiagramErrorCode> {
+        // TODO(@mxgrey): Eventually support fallback types. For now we will
+        // only support exact types, because we currently cannot know when all
+        // possible information is available, so using a fallback type could
+        // lead to race conditions and inconsistent workflow construction.
+        let id = self.into_operation_ref(id);
+        let Some(hints) = self.construction.buffer_hints.get(&id) else {
+            return Ok(None);
+        };
+
+        let Some(first_exact) = hints.iter().filter_map(|hint| hint.as_exact()).next() else {
+            return Ok(None);
+        };
+
+        for other in hints.iter().filter_map(|hint| hint.as_exact()) {
+            if other != first_exact {
+                return Err(DiagramErrorCode::InconsistentBufferHints(hints.iter().cloned().collect()));
+            }
+        }
+
+        Ok(Some(first_exact))
     }
 
     /// Redirect the inference of an input type to another input. This can be
@@ -348,6 +376,66 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
                 Ok(buffer_map)
             }
         }
+    }
+
+    pub fn set_listen_type_hints(
+        &mut self,
+        message_type: &TypeInfo,
+        buffers: &BufferSelection,
+    ) -> Result<(), DiagramErrorCode> {
+        self.set_type_hints(
+            message_type,
+            buffers,
+            MessageRegistry::listen_hint,
+        )
+    }
+
+    pub fn set_access_type_hints(
+        &mut self,
+        message_type: &TypeInfo,
+        buffers: &BufferSelection,
+    ) -> Result<(), DiagramErrorCode> {
+        self.set_type_hints(
+            message_type,
+            buffers,
+            MessageRegistry::accessor_hint,
+        )
+    }
+
+    fn set_type_hints(
+        &mut self,
+        message_type: &TypeInfo,
+        buffers: &BufferSelection,
+        get_hints: fn(&MessageRegistry, &TypeInfo, HashSet<BufferIdentifier<'static>>) -> Result<MessageTypeHintMap, DiagramErrorCode>,
+    ) -> Result<(), DiagramErrorCode> {
+        match buffers {
+            BufferSelection::Dict(mapping) => {
+                let identifiers = mapping.keys().map(|k| k.clone().into()).collect();
+                let hints = (get_hints)(&self.registry.messages, message_type, identifiers)?;
+                for (k, op_id) in mapping {
+                    let op_id = self.into_operation_ref(op_id);
+                    let k: BufferIdentifier = k.clone().into();
+                    let hint = hints
+                        .get(&k)
+                        .ok_or_else(|| DiagramErrorCode::BrokenBufferMessageTypeHint(k))?;
+                    self.construction.buffer_hints.entry(op_id).or_default().insert(*hint);
+                }
+            }
+            BufferSelection::Array(arr) => {
+                let identifiers = (0..arr.len()).into_iter().map(|k| k.into()).collect();
+                let hints = (get_hints)(&self.registry.messages, message_type, identifiers)?;
+                for (i, op_id) in arr.iter().enumerate() {
+                    let op_id = self.into_operation_ref(op_id);
+                    let k: BufferIdentifier = i.into();
+                    let hint = hints
+                        .get(&k)
+                        .ok_or_else(|| DiagramErrorCode::BrokenBufferMessageTypeHint(k))?;
+                    self.construction.buffer_hints.entry(op_id).or_default().insert(*hint);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get_implicit_error_target(&self) -> OperationRef {

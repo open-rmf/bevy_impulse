@@ -521,6 +521,10 @@ impl<T: 'static + Send + Sync> AsAnyBuffer for NonCopyBuffer<T> {
     fn as_any_buffer(&self) -> AnyBuffer {
         self.inner.as_any_buffer()
     }
+
+    fn message_type_hint() -> crate::MessageTypeHint {
+        crate::MessageTypeHint::exact::<T>()
+    }
 }
 
 impl<T: 'static + Send + Sync> Bufferable for NonCopyBuffer<T> {

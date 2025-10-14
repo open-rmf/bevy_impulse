@@ -19,7 +19,7 @@ use std::{
     any::{type_name, Any},
     borrow::{Borrow, Cow},
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     marker::PhantomData,
     sync::Arc,
 };
@@ -33,7 +33,8 @@ use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
     IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
     IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
-    NamedStream, Node, StreamAvailability, StreamOf, StreamPack,
+    NamedStream, Node, StreamAvailability, StreamOf, StreamPack, BufferIdentifier, MessageTypeHintMap,
+    IncompatibleLayout, BufferMapLayout,
 };
 
 #[cfg(feature = "trace")]
@@ -91,6 +92,7 @@ type SplitFn = fn(&SplitSchema, &mut Builder) -> Result<DynSplit, DiagramErrorCo
 type JoinFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
 type BufferAccessFn = fn(&BufferMap, &mut Builder) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
+type BufferLayoutTypeHintFn = fn(HashSet<BufferIdentifier<'static>>) -> Result<MessageTypeHintMap, IncompatibleLayout>;
 type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
@@ -732,7 +734,9 @@ pub struct MessageOperation {
     pub(super) split_impl: Option<SplitFn>,
     pub(super) join_impl: Option<JoinFn>,
     pub(super) buffer_access_impl: Option<BufferAccessFn>,
+    pub(super) accessor_hints: Option<BufferLayoutTypeHintFn>,
     pub(super) listen_impl: Option<ListenFn>,
+    pub(super) listen_hints: Option<BufferLayoutTypeHintFn>,
     pub(super) to_string_impl: Option<ToStringFn>,
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
@@ -756,7 +760,9 @@ impl MessageOperation {
             split_impl: None,
             join_impl: None,
             buffer_access_impl: None,
+            accessor_hints: None,
             listen_impl: None,
+            listen_hints: None,
             to_string_impl: None,
             create_buffer_impl: |settings, builder| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
@@ -1224,8 +1230,20 @@ impl MessageRegistry {
         self.messages
             .get(target_type)
             .and_then(|reg| reg.operations.buffer_access_impl.as_ref())
-            .ok_or(DiagramErrorCode::CannotBufferAccess)
+            .ok_or(DiagramErrorCode::CannotAccessBuffers(*target_type))
             .and_then(|f| f(buffers, builder))
+    }
+
+    pub fn accessor_hint(
+        &self,
+        message_info: &TypeInfo,
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, DiagramErrorCode> {
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.accessor_hints)
+            .ok_or_else(|| DiagramErrorCode::CannotAccessBuffers(*message_info))
+            .and_then(|f| (f)(identifiers).map_err(Into::into))
     }
 
     pub(super) fn register_buffer_access<T>(&mut self) -> bool
@@ -1247,6 +1265,8 @@ impl MessageRegistry {
             Ok(buffer_access.into())
         });
 
+        ops.accessor_hints = Some(<<T::BufferKeys as Accessor>::Buffers as BufferMapLayout>::get_buffer_message_type_hints);
+
         true
     }
 
@@ -1261,6 +1281,18 @@ impl MessageRegistry {
             .and_then(|reg| reg.operations.listen_impl.as_ref())
             .ok_or_else(|| DiagramErrorCode::CannotListen(*target_type))
             .and_then(|f| f(buffers, builder))
+    }
+
+    pub fn listen_hint(
+        &self,
+        message_info: &TypeInfo,
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, DiagramErrorCode> {
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.listen_hints)
+            .ok_or_else(|| DiagramErrorCode::CannotListen(*message_info))
+            .and_then(|f| (f)(identifiers).map_err(Into::into))
     }
 
     pub(super) fn register_listen<T>(&mut self) -> bool
@@ -1278,6 +1310,8 @@ impl MessageRegistry {
 
         ops.listen_impl =
             Some(|buffers, builder| Ok(builder.try_listen::<T>(buffers)?.output().into()));
+
+        ops.listen_hints = Some(<T::Buffers as BufferMapLayout>::get_buffer_message_type_hints);
 
         true
     }
