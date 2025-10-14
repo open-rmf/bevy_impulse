@@ -125,7 +125,7 @@ impl BuildDiagramOperation for BufferSchema {
                         // TODO(@mxgrey): We should allow users to explicitly specify the
                         // message type for the buffer. When they do, we won't need to wait
                         // for an input.
-                        return Ok(BuildStatus::defer("waiting for an input"));
+                        return Ok(BuildStatus::defer("waiting for enough info to infer buffer message type"));
                     };
 
                     inferred_type
