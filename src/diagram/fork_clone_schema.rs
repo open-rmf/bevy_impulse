@@ -22,8 +22,8 @@ use crate::{Builder, CloneFromBuffer, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
-    MessageOperation,
+    DynInputSlot, DynOutput, MessageOperation, NextOperation, OperationName, TraceInfo,
+    TraceSettings, TypeInfo,
 };
 
 /// If the request is cloneable, clone it into multiple responses that can

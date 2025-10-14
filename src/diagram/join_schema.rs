@@ -622,9 +622,9 @@ mod tests {
     #[test]
     fn test_diagram_join_by_clone() {
         let mut fixture = DiagramTestFixture::new();
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("check"),
-            |builder, config: i64| {
+        fixture
+            .registry
+            .register_node_builder(NodeBuilderOptions::new("check"), |builder, config: i64| {
                 builder.create_map_block(move |joined: JoinByCloneTest| {
                     if joined.count < config {
                         Err(joined.count + 1)
@@ -632,12 +632,14 @@ mod tests {
                         Ok(joined)
                     }
                 })
-            }
-        )
+            })
             .with_join()
             .with_result();
 
-        fixture.registry.register_message::<(String, i64)>().with_unzip();
+        fixture
+            .registry
+            .register_message::<(String, i64)>()
+            .with_unzip();
 
         // The diagram has a loop with a join of two buffers. One of the joined
         // bufffers gets cloned each time while the other gets pulled. We keep
