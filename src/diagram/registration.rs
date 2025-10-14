@@ -30,11 +30,11 @@ use anyhow::Error as Anyhow;
 
 pub use crate::dyn_node::*;
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
-    IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
-    IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
-    NamedStream, Node, StreamAvailability, StreamOf, StreamPack, BufferIdentifier, MessageTypeHintMap,
-    IncompatibleLayout, BufferMapLayout,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferIdentifier, BufferMap, BufferMapLayout, BufferSettings,
+    Builder, DisplayText, IncompatibleLayout, IncrementalScopeBuilder, IncrementalScopeRequest,
+    IncrementalScopeRequestResult, IncrementalScopeResponse, IncrementalScopeResponseResult,
+    Joined, JsonBuffer, JsonMessage, MessageTypeHintMap, NamedStream, Node, StreamAvailability,
+    StreamOf, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -92,7 +92,8 @@ type SplitFn = fn(&SplitSchema, &mut Builder) -> Result<DynSplit, DiagramErrorCo
 type JoinFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
 type BufferAccessFn = fn(&BufferMap, &mut Builder) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
-type BufferLayoutTypeHintFn = fn(HashSet<BufferIdentifier<'static>>) -> Result<MessageTypeHintMap, IncompatibleLayout>;
+type BufferLayoutTypeHintFn =
+    fn(HashSet<BufferIdentifier<'static>>) -> Result<MessageTypeHintMap, IncompatibleLayout>;
 type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;

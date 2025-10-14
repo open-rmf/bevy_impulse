@@ -35,11 +35,12 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessing, Accessor, Buffer, BufferAccessMut, BufferAccessors,
-    BufferError, BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation,
-    BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder, CloneFromBuffer,
-    DrainBuffer, FetchFromBuffer, Gate, GateState, IncompatibleLayout, InspectBuffer, Joining,
-    ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
-    TypeInfo, MessageTypeHint, BufferIdentifier, MessageTypeHintEvaluation, MessageTypeHintMap,
+    BufferError, BufferIdentifier, BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag,
+    BufferLocation, BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder,
+    CloneFromBuffer, DrainBuffer, FetchFromBuffer, Gate, GateState, IncompatibleLayout,
+    InspectBuffer, Joining, ManageBuffer, MessageTypeHint, MessageTypeHintEvaluation,
+    MessageTypeHintMap, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster,
+    OrBroken, TypeInfo,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer

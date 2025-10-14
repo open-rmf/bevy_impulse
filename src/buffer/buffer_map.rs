@@ -15,7 +15,10 @@
  *
 */
 
-use std::{borrow::Cow, collections::{HashMap, HashSet}};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use thiserror::Error as ThisError;
 
@@ -25,9 +28,9 @@ use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
     add_listener_to_source, Accessing, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
-    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, Gate, GateState,
-    Joining, Node, OperationError, OperationResult, OperationRoster, TypeInfo, CloneFromBuffer,
-    FetchFromBuffer,
+    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, CloneFromBuffer,
+    FetchFromBuffer, Gate, GateState, Joining, Node, OperationError, OperationResult,
+    OperationRoster, TypeInfo,
 };
 
 pub use bevy_impulse_derive::{Accessor, Joined};
@@ -270,7 +273,9 @@ impl MessageTypeHintEvaluation {
         self.unevaluated.retain(|identifier| {
             let is_index = identifier.is_index();
             if !is_index {
-                self.compatibility.forbidden_buffers.push(identifier.clone());
+                self.compatibility
+                    .forbidden_buffers
+                    .push(identifier.clone());
             }
 
             is_index
@@ -285,7 +290,9 @@ impl MessageTypeHintEvaluation {
         self.unevaluated.retain(|identifier| {
             let is_name = identifier.is_name();
             if !is_name {
-                self.compatibility.forbidden_buffers.push(identifier.clone());
+                self.compatibility
+                    .forbidden_buffers
+                    .push(identifier.clone());
             }
 
             is_name
@@ -295,18 +302,12 @@ impl MessageTypeHintEvaluation {
     }
 
     /// Indicate the exact message type hint of a certain identifier
-    pub fn exact<T: 'static>(
-        &mut self,
-        identifier: impl Into<BufferIdentifier<'static>>,
-    ) {
+    pub fn exact<T: 'static>(&mut self, identifier: impl Into<BufferIdentifier<'static>>) {
         self.set_hint(identifier, MessageTypeHint::exact::<T>());
     }
 
     /// Indicate a fallback message type hint of a certain identifier
-    pub fn fallback<T: 'static>(
-        &mut self,
-        identifier: impl Into<BufferIdentifier<'static>>,
-    ) {
+    pub fn fallback<T: 'static>(&mut self, identifier: impl Into<BufferIdentifier<'static>>) {
         self.set_hint(identifier, MessageTypeHint::fallback::<T>());
     }
 
@@ -326,7 +327,9 @@ impl MessageTypeHintEvaluation {
 
     /// Evaluate the message type hints
     pub fn evaluate(mut self) -> Result<MessageTypeHintMap, IncompatibleLayout> {
-        self.compatibility.forbidden_buffers.extend(self.unevaluated.into_iter());
+        self.compatibility
+            .forbidden_buffers
+            .extend(self.unevaluated.into_iter());
         self.compatibility.as_result()?;
         Ok(self.evaluated)
     }

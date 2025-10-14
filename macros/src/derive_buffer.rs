@@ -452,7 +452,8 @@ fn impl_joined(
                 )*})
             }
         }
-    }.into())
+    }
+    .into())
 }
 
 fn impl_accessed(

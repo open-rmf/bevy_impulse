@@ -125,7 +125,9 @@ impl BuildDiagramOperation for BufferSchema {
                         // TODO(@mxgrey): We should allow users to explicitly specify the
                         // message type for the buffer. When they do, we won't need to wait
                         // for an input.
-                        return Ok(BuildStatus::defer("waiting for enough info to infer buffer message type"));
+                        return Ok(BuildStatus::defer(
+                            "waiting for enough info to infer buffer message type",
+                        ));
                     };
 
                     inferred_type
@@ -1178,37 +1180,36 @@ mod tests {
             .register_node_builder(
                 NodeBuilderOptions::new("counting"),
                 |builder, config: i64| {
-                    let callback = move |
-                        In((_, keys)): In<((), TestInferAccessor)>,
-                        string_access: BufferAccess<String>,
-                        mut integer_access: BufferAccessMut<i64>,
-                    | {
-                        let mut buffer = integer_access.get_mut(&keys.integer).unwrap();
-                        if let Some(integer) = buffer.newest_mut() {
-                            if *integer >= config {
-                                let string = string_access
-                                    .get(&keys.string)
-                                    .unwrap()
-                                    .newest()
-                                    .cloned()
-                                    .ok_or(())?;
+                    let callback =
+                        move |In((_, keys)): In<((), TestInferAccessor)>,
+                              string_access: BufferAccess<String>,
+                              mut integer_access: BufferAccessMut<i64>| {
+                            let mut buffer = integer_access.get_mut(&keys.integer).unwrap();
+                            if let Some(integer) = buffer.newest_mut() {
+                                if *integer >= config {
+                                    let string = string_access
+                                        .get(&keys.string)
+                                        .unwrap()
+                                        .newest()
+                                        .cloned()
+                                        .ok_or(())?;
 
-                                return Ok((string, *integer));
+                                    return Ok((string, *integer));
+                                }
+
+                                // We haven't reached the desired count yet, so
+                                // increment and keep looping.
+                                *integer += 1;
+                            } else {
+                                // We've never used this buffer before, so push a zero into it.
+                                buffer.push(0);
                             }
 
-                            // We haven't reached the desired count yet, so
-                            // increment and keep looping.
-                            *integer += 1;
-                        } else {
-                            // We've never used this buffer before, so push a zero into it.
-                            buffer.push(0);
-                        }
-
-                        Err(())
-                    };
+                            Err(())
+                        };
 
                     builder.create_node(callback.into_blocking_callback())
-                }
+                },
             )
             .with_buffer_access()
             .with_result()
@@ -1222,16 +1223,15 @@ mod tests {
             .register_node_builder(
                 NodeBuilderOptions::new("set_string"),
                 |builder, config: String| {
-                    let callback = move |
-                        In((_, key)): In<((), BufferKey<String>)>,
-                        mut string_access: BufferAccessMut<String>,
-                    | {
-                        let mut buffer = string_access.get_mut(&key).unwrap();
-                        buffer.push(config.clone());
-                    };
+                    let callback =
+                        move |In((_, key)): In<((), BufferKey<String>)>,
+                              mut string_access: BufferAccessMut<String>| {
+                            let mut buffer = string_access.get_mut(&key).unwrap();
+                            buffer.push(config.clone());
+                        };
 
                     builder.create_node(callback.into_blocking_callback())
-                }
+                },
             )
             .with_buffer_access()
             .with_common_response();
@@ -1294,5 +1294,4 @@ mod tests {
         integer: BufferKey<i64>,
         string: BufferKey<String>,
     }
-
 }

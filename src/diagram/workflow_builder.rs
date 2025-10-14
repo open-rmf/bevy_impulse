@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder,
-    BuilderScopeContext, JsonMessage, Scope, StreamPack, MessageTypeHint, MessageTypeHintMap,
+    BuilderScopeContext, JsonMessage, MessageTypeHint, MessageTypeHintMap, Scope, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -32,8 +32,8 @@ use crate::{OperationInfo, Trace};
 use super::{
     BufferSelection, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot,
     DynOutput, FinishingErrors, ImplicitDeserialization, ImplicitSerialization, ImplicitStringify,
-    NamedOperationRef, NamespaceList, NextOperation, OperationName, OperationRef, Operations,
-    StreamOutRef, Templates, TraceToggle, TypeInfo, MessageRegistry,
+    MessageRegistry, NamedOperationRef, NamespaceList, NextOperation, OperationName, OperationRef,
+    Operations, StreamOutRef, Templates, TraceToggle, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -159,7 +159,9 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
 
         for other in hints.iter().filter_map(|hint| hint.as_exact()) {
             if other != first_exact {
-                return Err(DiagramErrorCode::InconsistentBufferHints(hints.iter().cloned().collect()));
+                return Err(DiagramErrorCode::InconsistentBufferHints(
+                    hints.iter().cloned().collect(),
+                ));
             }
         }
 
@@ -383,11 +385,7 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
         message_type: &TypeInfo,
         buffers: &BufferSelection,
     ) -> Result<(), DiagramErrorCode> {
-        self.set_type_hints(
-            message_type,
-            buffers,
-            MessageRegistry::listen_hint,
-        )
+        self.set_type_hints(message_type, buffers, MessageRegistry::listen_hint)
     }
 
     pub fn set_access_type_hints(
@@ -395,18 +393,18 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
         message_type: &TypeInfo,
         buffers: &BufferSelection,
     ) -> Result<(), DiagramErrorCode> {
-        self.set_type_hints(
-            message_type,
-            buffers,
-            MessageRegistry::accessor_hint,
-        )
+        self.set_type_hints(message_type, buffers, MessageRegistry::accessor_hint)
     }
 
     fn set_type_hints(
         &mut self,
         message_type: &TypeInfo,
         buffers: &BufferSelection,
-        get_hints: fn(&MessageRegistry, &TypeInfo, HashSet<BufferIdentifier<'static>>) -> Result<MessageTypeHintMap, DiagramErrorCode>,
+        get_hints: fn(
+            &MessageRegistry,
+            &TypeInfo,
+            HashSet<BufferIdentifier<'static>>,
+        ) -> Result<MessageTypeHintMap, DiagramErrorCode>,
     ) -> Result<(), DiagramErrorCode> {
         match buffers {
             BufferSelection::Dict(mapping) => {
@@ -418,7 +416,11 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
                     let hint = hints
                         .get(&k)
                         .ok_or_else(|| DiagramErrorCode::BrokenBufferMessageTypeHint(k))?;
-                    self.construction.buffer_hints.entry(op_id).or_default().insert(*hint);
+                    self.construction
+                        .buffer_hints
+                        .entry(op_id)
+                        .or_default()
+                        .insert(*hint);
                 }
             }
             BufferSelection::Array(arr) => {
@@ -430,7 +432,11 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
                     let hint = hints
                         .get(&k)
                         .ok_or_else(|| DiagramErrorCode::BrokenBufferMessageTypeHint(k))?;
-                    self.construction.buffer_hints.entry(op_id).or_default().insert(*hint);
+                    self.construction
+                        .buffer_hints
+                        .entry(op_id)
+                        .or_default()
+                        .insert(*hint);
                 }
             }
         }

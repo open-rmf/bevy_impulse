@@ -22,8 +22,8 @@ use smallvec::SmallVec;
 use crate::{
     Accessing, AnyBuffer, AsAnyBuffer, Buffer, BufferKey, BufferKeyBuilder, BufferKeyLifecycle,
     BufferLocation, Bufferable, Buffering, Builder, CloneFromBuffer, Gate, InputSlot,
-    InspectBuffer, JoinBehavior, Joining, ManageBuffer, OperationError, OperationResult,
-    OperationRoster, OrBroken, MessageTypeHint,
+    InspectBuffer, JoinBehavior, Joining, ManageBuffer, MessageTypeHint, OperationError,
+    OperationResult, OperationRoster, OrBroken,
 };
 
 /// This is an alternative to the [`Buffer`] and [`CloneFromBuffer`] structs
