@@ -22,8 +22,8 @@ use smallvec::SmallVec;
 use crate::{
     Accessing, AnyBuffer, AsAnyBuffer, Buffer, BufferKey, BufferKeyBuilder, BufferKeyLifecycle,
     BufferLocation, Bufferable, Buffering, Builder, CloneFromBuffer, Gate, InputSlot,
-    InspectBuffer, JoinBehavior, Joining, ManageBuffer, OperationError, OperationResult,
-    OperationRoster, OrBroken,
+    InspectBuffer, JoinBehavior, Joining, ManageBuffer, MessageTypeHint, OperationError,
+    OperationResult, OperationRoster, OrBroken,
 };
 
 /// This is an alternative to the [`Buffer`] and [`CloneFromBuffer`] structs
@@ -115,6 +115,10 @@ impl<T: 'static + Send + Sync> From<FetchFromBuffer<T>> for AnyBuffer {
 impl<T: 'static + Send + Sync> AsAnyBuffer for FetchFromBuffer<T> {
     fn as_any_buffer(&self) -> AnyBuffer {
         (*self).into()
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::exact::<T>()
     }
 }
 

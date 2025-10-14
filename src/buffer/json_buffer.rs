@@ -19,7 +19,7 @@
 
 use std::{
     any::TypeId,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::RangeBounds,
     sync::{Mutex, OnceLock},
 };
@@ -41,7 +41,8 @@ use crate::{
     BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferMap,
     BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffering, Builder,
     CloneFromBuffer, DrainBuffer, Gate, GateState, IncompatibleLayout, InspectBuffer, JoinBehavior,
-    Joined, Joining, ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
+    Joined, Joining, ManageBuffer, MessageTypeHint, MessageTypeHintEvaluation, MessageTypeHintMap,
+    NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -170,6 +171,10 @@ impl From<JsonBuffer> for AnyBuffer {
 impl AsAnyBuffer for JsonBuffer {
     fn as_any_buffer(&self) -> AnyBuffer {
         (*self).into()
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::fallback::<JsonMessage>()
     }
 }
 
@@ -1192,6 +1197,14 @@ impl BufferMapLayout for JsonBuffer {
 
         Err(compatibility)
     }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<super::MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        evaluation.fallback::<JsonMessage>(0);
+        evaluation.evaluate()
+    }
 }
 
 impl Joined for serde_json::Map<String, JsonMessage> {
@@ -1221,6 +1234,16 @@ impl BufferMapLayout for HashMap<String, JsonBuffer> {
 
         compatibility.as_result()?;
         Ok(downcast_buffers)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        while let Some(identifier) = evaluation.next_name_required() {
+            evaluation.fallback::<JsonMessage>(identifier);
+        }
+        evaluation.evaluate()
     }
 }
 
@@ -1265,6 +1288,16 @@ impl BufferMapLayout for HashMap<BufferIdentifier<'static>, JsonBuffer> {
 
         compatibility.as_result()?;
         Ok(downcast_buffers)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        while let Some(identifier) = evaluation.next_unevaluated() {
+            evaluation.fallback::<JsonMessage>(identifier);
+        }
+        evaluation.evaluate()
     }
 }
 

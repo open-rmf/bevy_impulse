@@ -115,17 +115,24 @@ impl BuildDiagramOperation for BufferSchema {
         let message_info = if self.serialize.is_some_and(|v| v) {
             TypeInfo::of::<JsonMessage>()
         } else {
-            let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
-                // There are no outputs ready for this target, so we can't do
-                // anything yet. The builder should try again later.
+            match ctx.infer_input_type_into_target(id)? {
+                Some(inferred_type) => inferred_type,
+                None => {
+                    let Some(inferred_type) = ctx.infer_buffer_message_type_from_hints(id)? else {
+                        // There are no outputs ready for this target, so we can't do
+                        // anything yet. The builder should try again later.
 
-                // TODO(@mxgrey): We should allow users to explicitly specify the
-                // message type for the buffer. When they do, we won't need to wait
-                // for an input.
-                return Ok(BuildStatus::defer("waiting for an input"));
-            };
+                        // TODO(@mxgrey): We should allow users to explicitly specify the
+                        // message type for the buffer. When they do, we won't need to wait
+                        // for an input.
+                        return Ok(BuildStatus::defer(
+                            "waiting for enough info to infer buffer message type",
+                        ));
+                    };
 
-            inferred_type
+                    inferred_type
+                }
+            }
         };
 
         let buffer = ctx.registry.messages.create_buffer(
@@ -210,6 +217,8 @@ impl BuildDiagramOperation for BufferAccessSchema {
             ));
         };
 
+        ctx.set_access_type_hints(&target_type, &self.buffers)?;
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
@@ -293,6 +302,8 @@ impl BuildDiagramOperation for ListenSchema {
                 "waiting to find out target message type",
             ));
         };
+
+        ctx.set_listen_type_hints(&target_type, &self.buffers)?;
 
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
@@ -1155,5 +1166,132 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_infer_buffer_type_from_access() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_deserializing()
+            .no_serializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("counting"),
+                |builder, config: i64| {
+                    let callback =
+                        move |In((_, keys)): In<((), TestInferAccessor)>,
+                              string_access: BufferAccess<String>,
+                              mut integer_access: BufferAccessMut<i64>| {
+                            let mut buffer = integer_access.get_mut(&keys.integer).unwrap();
+                            if let Some(integer) = buffer.newest_mut() {
+                                if *integer >= config {
+                                    let string = string_access
+                                        .get(&keys.string)
+                                        .unwrap()
+                                        .newest()
+                                        .cloned()
+                                        .ok_or(())?;
+
+                                    return Ok((string, *integer));
+                                }
+
+                                // We haven't reached the desired count yet, so
+                                // increment and keep looping.
+                                *integer += 1;
+                            } else {
+                                // We've never used this buffer before, so push a zero into it.
+                                buffer.push(0);
+                            }
+
+                            Err(())
+                        };
+
+                    builder.create_node(callback.into_blocking_callback())
+                },
+            )
+            .with_buffer_access()
+            .with_result()
+            .with_common_response();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_deserializing()
+            .no_serializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("set_string"),
+                |builder, config: String| {
+                    let callback =
+                        move |In((_, key)): In<((), BufferKey<String>)>,
+                              mut string_access: BufferAccessMut<String>| {
+                            let mut buffer = string_access.get_mut(&key).unwrap();
+                            buffer.push(config.clone());
+                        };
+
+                    builder.create_node(callback.into_blocking_callback())
+                },
+            )
+            .with_buffer_access()
+            .with_common_response();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork",
+            "ops": {
+                "fork": {
+                    "type": "fork_clone",
+                    "next": [
+                        "set_hello_access",
+                        "count_access"
+                    ]
+                },
+                "set_hello_access": {
+                    "type": "buffer_access",
+                    "buffers": ["string_buffer"],
+                    "next": "set_hello"
+                },
+                "set_hello": {
+                    "type": "node",
+                    "builder": "set_string",
+                    "config": "hello",
+                    "next": { "builtin": "dispose" }
+                },
+                "count_access": {
+                    "type": "buffer_access",
+                    "buffers": {
+                        "integer": "integer_buffer",
+                        "string": "string_buffer"
+                    },
+                    "next": "count"
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "counting",
+                    "config": 10,
+                    "next": "fork_result"
+                },
+                "fork_result": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": "count_access"
+                },
+                "string_buffer": { "type": "buffer" },
+                "integer_buffer": { "type": "buffer" }
+            }
+        }))
+        .unwrap();
+
+        let (string, integer): (String, i64) = fixture.spawn_and_run(&diagram, ()).unwrap();
+        fixture.context.assert_no_errors();
+        assert_eq!(string, "hello");
+        assert_eq!(integer, 10);
+    }
+
+    #[derive(Accessor, Clone)]
+    struct TestInferAccessor {
+        integer: BufferKey<i64>,
+        string: BufferKey<String>,
     }
 }

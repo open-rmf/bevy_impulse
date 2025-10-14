@@ -398,6 +398,17 @@ fn impl_buffer_map_layout(
                     )*
                 })
             }
+
+            fn get_buffer_message_type_hints(
+                identifiers: ::std::collections::HashSet<::bevy_impulse::BufferIdentifier<'static>>,
+            ) -> ::std::result::Result<::bevy_impulse::MessageTypeHintMap, ::bevy_impulse::IncompatibleLayout> {
+                let mut evaluation = ::bevy_impulse::MessageTypeHintEvaluation::new(identifiers);
+                #(
+                    evaluation.set_hint(#map_key, <#buffer as ::bevy_impulse::AsAnyBuffer>::message_type_hint());
+                )*
+
+                evaluation.evaluate()
+            }
         }
 
         impl #impl_generics ::bevy_impulse::BufferMapStruct for #struct_ident #ty_generics #where_clause {
@@ -427,7 +438,11 @@ fn impl_joined(
         impl #impl_generics ::bevy_impulse::Joining for #struct_ident #ty_generics #where_clause {
             type Item = #item_struct_ident #ty_generics;
 
-            fn fetch_for_join(&self, session: ::bevy_impulse::re_exports::Entity, world: &mut ::bevy_impulse::re_exports::World) -> Result<Self::Item, ::bevy_impulse::OperationError> {
+            fn fetch_for_join(
+                &self,
+                session: ::bevy_impulse::re_exports::Entity,
+                world: &mut ::bevy_impulse::re_exports::World,
+            ) -> ::std::result::Result<Self::Item, ::bevy_impulse::OperationError> {
                 #(
                     let #field_ident = self.#field_ident.fetch_for_join(session, world)?;
                 )*
@@ -437,7 +452,8 @@ fn impl_joined(
                 )*})
             }
         }
-    }.into())
+    }
+    .into())
 }
 
 fn impl_accessed(
