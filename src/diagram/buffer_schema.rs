@@ -327,8 +327,8 @@ mod tests {
     use crate::{
         diagram::testing::DiagramTestFixture, Accessor, AnyBufferKey, AnyBufferWorldAccess,
         BufferAccess, BufferAccessMut, BufferKey, BufferWorldAccess, Diagram, DiagramErrorCode,
-        IntoBlockingCallback, JsonBufferKey, JsonBufferWorldAccess, JsonMessage,
-        Node, NodeBuilderOptions,
+        IntoBlockingCallback, JsonBufferKey, JsonBufferWorldAccess, JsonMessage, Node,
+        NodeBuilderOptions,
     };
 
     /// create a new [`DiagramTestFixture`] with some extra builders.
@@ -447,18 +447,15 @@ mod tests {
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("json_convert_i64"),
             |builder, _config: ()| {
-                builder.create_map_block(|msg: JsonMessage| {
-                    msg.as_number().unwrap().as_i64().unwrap()
-                })
+                builder
+                    .create_map_block(|msg: JsonMessage| msg.as_number().unwrap().as_i64().unwrap())
             },
         );
 
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("json_convert_string"),
             |builder, _config: ()| {
-                builder.create_map_block(|msg: JsonMessage| {
-                    msg.as_str().unwrap().to_owned()
-                })
+                builder.create_map_block(|msg: JsonMessage| msg.as_str().unwrap().to_owned())
             },
         );
 

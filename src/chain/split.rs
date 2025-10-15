@@ -55,7 +55,10 @@ pub trait Splittable: Sized {
     fn next(key: &Option<Self::Key>) -> Option<Self::Key>;
 
     /// Split the value into its parts
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult;
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult;
 }
 
 /// This is returned by [`Chain::split`] and allows you to connect to the
@@ -244,7 +247,10 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     }
 
     /// Get the output slot for an element in the split.
-    pub fn output_for(&mut self, key: T::Key) -> Result<Output<(T::Identifier, T::Item)>, SplitConnectionError> {
+    pub fn output_for(
+        &mut self,
+        key: T::Key,
+    ) -> Result<Output<(T::Identifier, T::Item)>, SplitConnectionError> {
         if !T::validate(&key) {
             return Err(SplitConnectionError::KeyOutOfBounds);
         }
@@ -295,7 +301,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     ///
     /// This can only be used once, after which it will return an error. It will
     /// also return an error after [`Self::remaining_branch`] has been used.
-    pub fn remaining_output(&mut self) -> Result<Output<(T::Identifier, T::Item)>, SplitConnectionError>
+    pub fn remaining_output(
+        &mut self,
+    ) -> Result<Output<(T::Identifier, T::Item)>, SplitConnectionError>
     where
         T::Key: ForRemaining,
     {
@@ -556,7 +564,10 @@ where
         }
     }
 
-    fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         for (index, value) in self.contents.into_iter().enumerate() {
             match dispatcher.outputs_for(&ListSplitKey::Sequential(index)) {
                 Some(outputs) => {
@@ -588,7 +599,10 @@ impl<T: 'static + Send + Sync> Splittable for Vec<T> {
         SplitAsList::<Self>::next(key)
     }
 
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         SplitAsList::new(self).split(dispatcher)
     }
 }
@@ -607,7 +621,10 @@ impl<T: 'static + Send + Sync, const N: usize> Splittable for smallvec::SmallVec
         SplitAsList::<Self>::next(key)
     }
 
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         SplitAsList::new(self).split(dispatcher)
     }
 }
@@ -635,7 +652,10 @@ impl<T: 'static + Send + Sync, const N: usize> Splittable for [T; N] {
         }
     }
 
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         SplitAsList::new(self).split(dispatcher)
     }
 }
@@ -752,7 +772,10 @@ where
         MapSplitKey::next(key)
     }
 
-    fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         let mut next_seq = 0;
         for (specific_key, value) in self.contents.into_iter() {
             let key = MapSplitKey::Specific(specific_key);
@@ -803,7 +826,10 @@ where
         SplitAsMap::<K, V, Self>::next(key)
     }
 
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         SplitAsMap::new(self).split(dispatcher)
     }
 }
@@ -825,7 +851,10 @@ where
         SplitAsMap::<K, V, Self>::next(key)
     }
 
-    fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         SplitAsMap::new(self).split(dispatcher)
     }
 }

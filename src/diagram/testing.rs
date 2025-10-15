@@ -2,11 +2,11 @@ use std::error::Error;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, Number, json};
+use serde_json::{json, Number, Value};
 
 use crate::{
-    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
-    StreamPack, ConfigExample,
+    testing::TestingContext, Builder, ConfigExample, JsonMessage, RequestExt,
+    RunCommandsOnWorldExt, Service, StreamPack,
 };
 
 pub use crate::testing::FlushConditions;

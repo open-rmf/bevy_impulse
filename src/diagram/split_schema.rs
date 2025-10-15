@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
-    OperationResult, SplitDispatcher, Splittable, is_default,
+    is_default, Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
+    OperationResult, SplitDispatcher, Splittable,
 };
 
 use super::{
@@ -153,7 +153,10 @@ impl Splittable for Value {
         MapSplitKey::next(key)
     }
 
-    fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
+    fn split(
+        self,
+        mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>,
+    ) -> OperationResult {
         match self {
             Value::Array(array) => {
                 for (index, value) in array.into_iter().enumerate() {
@@ -283,20 +286,17 @@ where
         let mut outputs = Vec::new();
         let mut split = split.build(builder);
         for (key, target) in &split_op.keyed {
-            let output = split.specific_chain(
-                key.clone(),
-                |chain| chain.map_block(|(_, value)| value).output()
-            )?;
+            let output = split.specific_chain(key.clone(), |chain| {
+                chain.map_block(|(_, value)| value).output()
+            })?;
 
             outputs.push((target.clone(), output.into()));
         }
 
         for (i, target) in split_op.sequential.iter().enumerate() {
             if let Some(target) = target {
-                let output = split.sequential_chain(
-                    i,
-                    |chain| chain.map_block(|(_, value)| value).output()
-                )?;
+                let output = split
+                    .sequential_chain(i, |chain| chain.map_block(|(_, value)| value).output())?;
 
                 outputs.push((target.clone(), output.into()))
             } else {
@@ -310,8 +310,8 @@ where
         }
 
         if let Some(remaining_target) = &split_op.remaining {
-            let output = split
-                .remaining_chain(|chain| chain.map_block(|(_, value)| value).output())?;
+            let output =
+                split.remaining_chain(|chain| chain.map_block(|(_, value)| value).output())?;
             outputs.push((remaining_target.clone(), output.into()));
         }
 
@@ -572,9 +572,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, ())
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, ()).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 2);
     }
@@ -613,9 +611,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, ())
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, ()).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         // "a" is "eaten" up by the keyed path, so we should be the result of "b".
         assert_eq!(result, 2);
@@ -655,9 +651,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, ())
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, ()).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 2);
     }
