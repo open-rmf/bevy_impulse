@@ -30,7 +30,6 @@ import {
   type SectionInputNode,
   SectionOutputIcon,
   type SectionOutputNode,
-  SerializedJoinIcon,
   SplitIcon,
   StreamOutIcon,
   TransformIcon,
@@ -273,20 +272,6 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
         }}
       >
         Join
-      </StyledOperationButton>
-      <StyledOperationButton
-        startIcon={<SerializedJoinIcon />}
-        onClick={() =>
-          onAdd?.(
-            createNodeChange(namespace, parentId, newNodePosition, {
-              type: 'serialized_join',
-              buffers: [],
-              next: { builtin: 'dispose' },
-            }),
-          )
-        }
-      >
-        Serialized Join
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<TransformIcon />}

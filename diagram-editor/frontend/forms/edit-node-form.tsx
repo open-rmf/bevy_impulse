@@ -9,6 +9,7 @@ import { exhaustiveCheck } from '../utils/exhaustive-check';
 import BaseEditOperationForm from './base-edit-operation-form';
 import BufferForm, { type BufferFormProps } from './buffer-form';
 import EditScopeForm, { type ScopeFormProps } from './edit-scope-form';
+import JoinForm, { type JoinFormProps } from './join-form';
 import NodeForm, { type NodeFormProps } from './node-form';
 import {
   SectionBufferForm,
@@ -33,6 +34,9 @@ function EditOperationNodeForm(props: EditOperationNodeFormProps) {
     }
     case 'buffer': {
       return <BufferForm {...(props as BufferFormProps)} />;
+    }
+    case 'join': {
+      return <JoinForm {...(props as JoinFormProps)} />;
     }
     case 'scope': {
       return <EditScopeForm {...(props as ScopeFormProps)} />;

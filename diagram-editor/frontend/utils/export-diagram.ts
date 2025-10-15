@@ -181,14 +181,7 @@ function syncEdge(
         }
         break;
       }
-      case 'join': {
-        if (edge.type !== 'default') {
-          throw new Error('expected "default" edge');
-        }
-
-        sourceOp.next = nodeManager.getTargetNextOp(edge);
-        break;
-      }
+      case 'join':
       case 'serialized_join':
       case 'transform':
       case 'buffer_access':
