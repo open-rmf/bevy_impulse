@@ -258,7 +258,7 @@ function syncEdge(
             // this works because js allows non-sequential arrays
             const next = nodeManager.getTargetNextOp(edge);
             sourceOp.sequential[edge.data.output.seq] =
-              next ? next : "{ \"builtin\" : \"dispose\" }";
+              next ? next : { builtin: 'dispose' };
             break;
           }
           case 'splitRemaining': {
