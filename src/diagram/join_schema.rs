@@ -23,6 +23,7 @@ use super::{
     BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     JsonMessage, NextOperation, OperationName,
 };
+use crate::{default_as_false, is_default, is_false, BufferIdentifier};
 
 /// Wait for exactly one item to be available in each buffer listed in
 /// `buffers`, then join each of those items into a single output message
@@ -81,10 +82,24 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct JoinSchema {
-    pub(super) next: NextOperation,
+    /// The operation that the joined value will be passed to.
+    pub next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferSelection,
+    pub buffers: BufferSelection,
+
+    /// List of the keys in the `buffers` dictionary whose value should be cloned
+    /// instead of removed from the buffer (pulled) when the join occurs. Cloning
+    /// the value will leave the buffer unchanged after the join operation takes
+    /// place.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub clone: Vec<BufferIdentifier<'static>>,
+
+    /// Whether or not to automatically serialize the inputs into a single JsonMessage.
+    /// This will only work if all input types are serializable, otherwise you will
+    /// get a [`DiagramError`][super::DiagramError].
+    #[serde(default = "default_as_false", skip_serializing_if = "is_false")]
+    pub serialize: bool,
 }
 
 impl BuildDiagramOperation for JoinSchema {
@@ -97,22 +112,40 @@ impl BuildDiagramOperation for JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
-            return Ok(BuildStatus::defer(
-                "waiting to find out target message type",
-            ));
-        };
-
-        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
+        let mut buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let output = ctx
-            .registry
-            .messages
-            .join(&target_type, &buffer_map, ctx.builder)?;
-        ctx.add_output_into_target(&self.next, output);
+        for to_clone in &self.clone {
+            let Some(buffer) = buffer_map.get_mut(to_clone) else {
+                return Err(DiagramErrorCode::UnknownJoinField {
+                    unknown: to_clone.clone(),
+                    available: buffer_map.keys().cloned().collect(),
+                });
+            };
+
+            *buffer = (*buffer)
+                .join_by_cloning()
+                .ok_or_else(|| DiagramErrorCode::NotCloneable(buffer.message_type()))?;
+        }
+
+        if self.serialize {
+            let output = ctx.builder.try_join::<JsonMessage>(&buffer_map)?.output();
+            ctx.add_output_into_target(&self.next, output.into());
+        } else {
+            let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+                return Ok(BuildStatus::defer(
+                    "waiting to find out target message type",
+                ));
+            };
+
+            let output = ctx
+                .registry
+                .messages
+                .join(&target_type, &buffer_map, ctx.builder)?;
+            ctx.add_output_into_target(&self.next, output);
+        }
         Ok(BuildStatus::Finished)
     }
 }
@@ -584,5 +617,82 @@ mod tests {
         assert_eq!(object["foobar_1"].as_object().unwrap()["bar"], "bar_1");
         assert_eq!(object["foobar_2"].as_object().unwrap()["foo"], "foo_2");
         assert_eq!(object["foobar_2"].as_object().unwrap()["bar"], "bar_2");
+    }
+
+    #[test]
+    fn test_diagram_join_by_clone() {
+        let mut fixture = DiagramTestFixture::new();
+        fixture
+            .registry
+            .register_node_builder(NodeBuilderOptions::new("check"), |builder, config: i64| {
+                builder.create_map_block(move |joined: JoinByCloneTest| {
+                    if joined.count < config {
+                        Err(joined.count + 1)
+                    } else {
+                        Ok(joined)
+                    }
+                })
+            })
+            .with_join()
+            .with_result();
+
+        fixture
+            .registry
+            .register_message::<(String, i64)>()
+            .with_unzip();
+
+        // The diagram has a loop with a join of two buffers. One of the joined
+        // bufffers gets cloned each time while the other gets pulled. We keep
+        // refreshing the pulled buffer until its value reaches 10. We expect
+        // the cloned value to keep being available over and over without putting
+        // any new value inside of it because we are cloning from it instead of
+        // pulling.
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "unzip",
+            "ops": {
+                "unzip": {
+                    "type": "unzip",
+                    "next": [
+                        "message_buffer",
+                        "count_buffer"
+                    ]
+                },
+                "message_buffer": { "type": "buffer" },
+                "count_buffer": { "type": "buffer" },
+                "join": {
+                    "type": "join",
+                    "buffers": {
+                        "count": "count_buffer",
+                        "message": "message_buffer"
+                    },
+                    "clone": [ "message" ],
+                    "next": "check"
+                },
+                "check": {
+                    "type": "node",
+                    "builder": "check",
+                    "config": 10,
+                    "next": "fork_result"
+                },
+                "fork_result": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": "count_buffer"
+                }
+            }
+        }))
+        .unwrap();
+
+        let input = (String::from("hello"), 0_i64);
+        let result: JoinByCloneTest = fixture.spawn_and_run(&diagram, input).unwrap();
+        assert_eq!(result.count, 10);
+        assert_eq!(result.message, "hello");
+    }
+
+    #[derive(Joined, Clone, Serialize, Deserialize, JsonSchema)]
+    struct JoinByCloneTest {
+        count: i64,
+        message: String,
     }
 }

@@ -17,18 +17,21 @@
 
 use bevy_ecs::{
     change_detection::Mut,
-    prelude::{Commands, Entity, Query, World},
+    prelude::{Commands, Entity, EntityRef, Query, World},
     query::QueryEntityError,
     system::{SystemParam, SystemState},
 };
 
-use std::{ops::RangeBounds, sync::Arc};
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    ops::RangeBounds,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use thiserror::Error as ThisError;
 
-use crate::{
-    Builder, Chain, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
-};
+use crate::{GateState, InputSlot, NotifyBufferUpdate, OperationError};
 
 mod any_buffer;
 pub use any_buffer::*;
@@ -63,6 +66,9 @@ mod json_buffer;
 #[cfg(feature = "diagram")]
 pub use json_buffer::*;
 
+mod fetch_from_buffer;
+pub use fetch_from_buffer::*;
+
 /// A buffer is a special type of node within a workflow that is able to store
 /// and release data. When a session is finished, the buffered data from the
 /// session will be automatically cleared.
@@ -71,31 +77,17 @@ pub struct Buffer<T> {
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T> Buffer<T> {
-    /// Get a unit `()` trigger output each time a new value is added to the buffer.
-    pub fn on_new_value<'w, 's, 'a, 'b>(
-        &self,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope(), builder.scope());
-        let target = builder.commands.spawn(UnusedTarget).id();
-        builder
-            .commands
-            .queue(OnNewBufferValue::new(self.id(), target));
-        Chain::new(target, builder)
-    }
-
-    /// Specify that you want to pull from this Buffer by cloning. This can be
-    /// used by operations like join to tell them that they should clone from
-    /// the buffer instead of consuming from it.
-    pub fn by_cloning(self) -> CloneFromBuffer<T>
+impl<T: 'static + Send + Sync> Buffer<T> {
+    /// Specify that you want this Buffer to join by cloning an element. This
+    /// can be used by operations like join to tell them that they should clone
+    /// from the buffer instead of consuming from it.
+    ///
+    /// This can only be used for message types that support [`Clone`].
+    pub fn join_by_cloning(self) -> CloneFromBuffer<T>
     where
         T: Clone,
     {
-        CloneFromBuffer {
-            location: self.location,
-            _ignore: Default::default(),
-        }
+        CloneFromBuffer::new(self.location)
     }
 
     /// Get an input slot for this buffer.
@@ -139,15 +131,19 @@ pub struct BufferLocation {
 }
 
 #[derive(Clone)]
-pub struct CloneFromBuffer<T: Clone> {
-    pub(crate) location: BufferLocation,
-    pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
+pub struct CloneFromBuffer<T: Clone + Send + Sync + 'static> {
+    location: BufferLocation,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-//
-impl<T: Clone> Copy for CloneFromBuffer<T> {}
+impl<T: Clone + Send + Sync + 'static> Copy for CloneFromBuffer<T> {}
 
-impl<T: Clone> CloneFromBuffer<T> {
+impl<T: Clone + Send + Sync + 'static> CloneFromBuffer<T> {
+    /// Get an input slot for this buffer.
+    pub fn input_slot(self) -> InputSlot<T> {
+        InputSlot::new(self.scope(), self.id())
+    }
+
     /// Get the entity ID of the buffer.
     pub fn id(&self) -> Entity {
         self.location.source
@@ -162,9 +158,78 @@ impl<T: Clone> CloneFromBuffer<T> {
     pub fn location(&self) -> BufferLocation {
         self.location
     }
+
+    /// Specify that you want this Buffer to join by pulling an element. This
+    /// is the default behavior of a Buffer, so you don't generally need to call
+    /// this method, but you can use it to change from the join-by-cloning
+    /// setting back to join-by-pulling.
+    #[must_use]
+    pub fn join_by_pulling(self) -> Buffer<T> {
+        Buffer {
+            location: self.location,
+            _ignore: Default::default(),
+        }
+    }
+
+    fn new(location: BufferLocation) -> Self {
+        Self::register_clone_for_join();
+        Self {
+            location,
+            _ignore: Default::default(),
+        }
+    }
+
+    /// This function ensures that [`AnyBuffer`] can be downcast into a
+    /// [`CloneFromBuffer`] and that it can correctly transfer any Cloning join
+    /// behavior if it gets downcast to a [`FetchFromBuffer`].
+    pub fn register_clone_for_join() {
+        static REGISTER_CLONE: OnceLock<Mutex<HashMap<TypeId, ()>>> = OnceLock::new();
+        let register_clone = REGISTER_CLONE.get_or_init(|| Mutex::default());
+
+        // TODO(@mxgrey): Consider whether there is a way to avoid needing all
+        // these mutex locks and hashmap lookups every time we create a CloneFromBuffer.
+        let mut register_mut = register_clone.lock().unwrap();
+        register_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+            let interface = AnyBuffer::interface_for::<T>();
+            interface.register_cloning(
+                clone_for_any_join::<T>,
+                &(clone_for_join::<T> as FetchFromBufferFn<T>),
+            );
+            interface.register_buffer_downcast(
+                TypeId::of::<CloneFromBuffer<T>>(),
+                Box::new(|buffer: AnyBuffer| {
+                    Ok(Box::new(CloneFromBuffer::<T>::new(buffer.location)))
+                }),
+            );
+        });
+    }
 }
 
-impl<T: Clone> From<CloneFromBuffer<T>> for Buffer<T> {
+fn clone_for_any_join<T: 'static + Send + Sync + Clone>(
+    entity_ref: &EntityRef,
+    session: Entity,
+) -> Result<AnyMessageBox, OperationError> {
+    // In general we expect pulling to imply pulling the oldest since the most
+    // typical pattern when information is being pulled from a source would be
+    // FIFO. It's very unlikely that someone pulling information would want the
+    // order that they're pulling data to be backwards. However for cloning it's
+    // much less obvious: Would someone want to clone the oldest piece of data
+    // or the newest?
+    //
+    // For now we will assume that If the user is cloning information without
+    // removing it, then they are leaving the old data in there to act as a
+    // history, and therefore when cloning they will always want the newest.
+    //
+    // TODO(@mxgrey): Allow users to set whether pull and/or clone should
+    // be operating on the oldest data or the newest, by default. Also allow
+    // the join operations themselves override this, e.g. putting a setting
+    // into BufferLocation to change which side is being pulled from.
+    entity_ref
+        .clone_from_buffer::<T>(session)
+        .map(to_any_message)
+}
+
+impl<T: Clone + Send + Sync> From<CloneFromBuffer<T>> for Buffer<T> {
     fn from(value: CloneFromBuffer<T>) -> Self {
         Buffer {
             location: value.location,
@@ -282,7 +347,7 @@ impl<T> BufferKey<T> {
     }
 }
 
-impl<T> BufferKeyLifecycle for BufferKey<T> {
+impl<T: 'static + Send + Sync> BufferKeyLifecycle for BufferKey<T> {
     type TargetBuffer = Buffer<T>;
 
     fn create_key(buffer: &Self::TargetBuffer, builder: &BufferKeyBuilder) -> Self {
@@ -762,7 +827,7 @@ pub enum BufferError {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, Gate};
+    use crate::{prelude::*, testing::*, AddBufferToMap, Gate};
     use std::future::Future;
 
     #[test]
@@ -1210,5 +1275,60 @@ mod tests {
         } else {
             (None, Some(0))
         }
+    }
+
+    #[test]
+    fn test_any_buffer_join_by_clone() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let message_buffer = builder.create_buffer(Default::default()).join_by_cloning();
+            let count_buffer = builder.create_buffer(Default::default());
+            let (message, count) = builder.chain(scope.input).unzip();
+            builder.connect(message, message_buffer.input_slot());
+            builder.connect(count, count_buffer.input_slot());
+
+            // Make absolutely sure that the type information has been erased
+            // before we assemble the buffer map.
+            let any_message_buffer = message_buffer.as_any_buffer();
+            let any_count_buffer = count_buffer.as_any_buffer();
+
+            let mut buffer_map = BufferMap::default();
+            buffer_map.insert_buffer("message", any_message_buffer);
+            buffer_map.insert_buffer("count", any_count_buffer);
+
+            builder
+                .try_join::<JoinByCloneTest>(&buffer_map)
+                .unwrap()
+                .map_block(|joined| {
+                    if joined.count < 10 {
+                        // Increment the count buffer
+                        Err(joined.count + 1)
+                    } else {
+                        Ok(joined)
+                    }
+                })
+                .fork_result(
+                    |ok| ok.connect(scope.terminate),
+                    |err| err.connect(count_buffer.input_slot()),
+                );
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((String::from("hello"), 0), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let r = promise.take().available().unwrap();
+        assert_eq!(r.count, 10);
+        assert_eq!(r.message, "hello");
+    }
+
+    #[derive(Joined)]
+    struct JoinByCloneTest {
+        count: i64,
+        message: String,
     }
 }

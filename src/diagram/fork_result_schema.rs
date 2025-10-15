@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
-    PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
+    RegisterClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 pub struct DynForkResult {
@@ -103,7 +103,7 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
     S: SerializeMessage<T> + SerializeMessage<E>,
-    C: PerformForkClone<T> + PerformForkClone<E>,
+    C: RegisterClone<T> + RegisterClone<E>,
 {
     fn on_register(registry: &mut MessageRegistry) -> bool {
         let ops = &mut registry
@@ -125,10 +125,10 @@ where
         });
 
         registry.register_serialize::<T, S>();
-        registry.register_fork_clone::<T, C>();
+        registry.register_clone::<T, C>();
 
         registry.register_serialize::<E, S>();
-        registry.register_fork_clone::<E, C>();
+        registry.register_clone::<E, C>();
 
         true
     }
@@ -161,7 +161,7 @@ mod tests {
                 NodeBuilderOptions::new("check_even".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
             )
-            .with_fork_result();
+            .with_result();
 
         fn echo(s: String) -> String {
             s

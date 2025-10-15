@@ -263,7 +263,7 @@ impl DiagramElementRegistry {
                 Ok(node)
             },
         )
-        .with_fork_result();
+        .with_result();
     }
 }
 

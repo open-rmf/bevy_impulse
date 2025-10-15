@@ -46,7 +46,7 @@ pub use ros2::*;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
+use fork_clone_schema::{DynForkClone, ForkCloneSchema, RegisterClone};
 use fork_result_schema::{DynForkResult, ForkResultSchema};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
@@ -75,8 +75,8 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    is_default, Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
-    SpawnWorkflowExt, SplitConnectionError, StreamPack,
+    is_default, BufferIdentifier, Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage,
+    MessageTypeHint, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
@@ -819,13 +819,13 @@ pub enum DiagramErrorCode {
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
-    #[error("Serialization was disabled for the target message type.")]
+    #[error("Serialization was not registered for the target message type.")]
     NotSerializable(TypeInfo),
 
-    #[error("Deserialization was disabled for the target message type.")]
+    #[error("Deserialization was not registered for the target message type.")]
     NotDeserializable(TypeInfo),
 
-    #[error("Cloning was disabled for the target message type. Type: {0}")]
+    #[error("Cloning was not registered for the target message type. Type: {0}")]
     NotCloneable(TypeInfo),
 
     #[error("The target message type does not support unzipping. Type: {0}")]
@@ -838,7 +838,9 @@ pub enum DiagramErrorCode {
         elements: Vec<TypeInfo>,
     },
 
-    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output. Type: {0}")]
+    #[error(
+        "Call .with_result() on your node to be able to fork its Result-type output. Type: {0}"
+    )]
     CannotForkResult(TypeInfo),
 
     #[error("Response cannot be split. Make sure to use .with_split() when building the node. Type: {0}")]
@@ -851,6 +853,12 @@ pub enum DiagramErrorCode {
 
     #[error("Empty join is not allowed.")]
     EmptyJoin,
+
+    #[error("Unknown buffer identifier [{unknown}] used for join containing {}", format_list(.available))]
+    UnknownJoinField {
+        unknown: BufferIdentifier<'static>,
+        available: Vec<BufferIdentifier<'static>>,
+    },
 
     #[error("Target type cannot be determined from [next] and [target_node] is not provided or cannot be inferred from.")]
     UnknownTarget,
@@ -870,14 +878,20 @@ pub enum DiagramErrorCode {
     #[error("box/unbox operation for the message is not registered")]
     CannotBoxOrUnbox,
 
-    #[error("Buffer access was not enabled for a node connected to a buffer access operation. Make sure to use .with_buffer_access() when building the node.")]
-    CannotBufferAccess,
+    #[error("buffer access is not registered for {0}")]
+    CannotAccessBuffers(TypeInfo),
 
-    #[error("cannot listen on these buffers to produce a request of [{0}]")]
+    #[error("listening is not registered for {0}")]
     CannotListen(TypeInfo),
 
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
+
+    #[error("inconsistent type hints for the buffer message: {}", format_list(&.0))]
+    InconsistentBufferHints(Vec<MessageTypeHint>),
+
+    #[error("This error should not happen, it means the implementation of buffer hints is broken. Identifier of missing hint: {0}")]
+    BrokenBufferMessageTypeHint(BufferIdentifier<'static>),
 
     #[error(transparent)]
     SectionError(#[from] SectionError),
@@ -1301,7 +1315,7 @@ mod tests {
         fixture
             .registry
             .register_message::<Result<f32, ()>>()
-            .with_fork_result();
+            .with_result();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

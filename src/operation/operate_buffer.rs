@@ -17,20 +17,16 @@
 
 use bevy_ecs::prelude::{Bundle, Command, Component, Entity, World};
 
-use std::{collections::HashMap, sync::Arc};
-
-use anyhow::anyhow;
-
-use backtrace::Backtrace;
+use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
 use crate::{
     Broken, BufferAccessors, BufferSettings, BufferStorage, DeferredRoster, ForkTargetStorage,
     Gate, GateActionStorage, Input, InputBundle, InspectBuffer, ManageBuffer, ManageInput,
-    MiscellaneousFailure, Operation, OperationCleanup, OperationError, OperationReachability,
-    OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
-    ReachabilityResult, SingleInputStorage, UnhandledErrors,
+    Operation, OperationCleanup, OperationError, OperationReachability, OperationRequest,
+    OperationResult, OperationRoster, OperationSetup, OrBroken, ReachabilityResult,
+    SingleInputStorage, UnhandledErrors,
 };
 
 #[derive(Bundle)]
@@ -202,50 +198,6 @@ impl RelatedGateNodes {
         }
 
         Ok(false)
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct OnNewBufferValue {
-    buffer: Entity,
-    target: Entity,
-}
-
-impl OnNewBufferValue {
-    pub(crate) fn new(buffer: Entity, target: Entity) -> Self {
-        OnNewBufferValue { buffer, target }
-    }
-}
-
-impl Command for OnNewBufferValue {
-    fn apply(self, world: &mut World) {
-        let Some(mut buffer_targets) = world.get_mut::<ForkTargetStorage>(self.buffer) else {
-            self.on_failure(world);
-            return;
-        };
-
-        buffer_targets.0.push(self.buffer);
-
-        let Ok(mut target_mut) = world.get_entity_mut(self.target) else {
-            self.on_failure(world);
-            return;
-        };
-
-        target_mut.insert(SingleInputStorage::new(self.buffer));
-    }
-}
-
-impl OnNewBufferValue {
-    fn on_failure(self, world: &mut World) {
-        world
-            .get_resource_or_insert_with(UnhandledErrors::default)
-            .miscellaneous
-            .push(MiscellaneousFailure {
-                error: Arc::new(anyhow!(
-                    "Unable to add target with OnNewBufferValue: {self:?}"
-                )),
-                backtrace: Some(Backtrace::new()),
-            });
     }
 }
 

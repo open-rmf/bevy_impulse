@@ -19,7 +19,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     ops::RangeBounds,
     sync::{Mutex, OnceLock},
 };
@@ -35,10 +35,12 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessing, Accessor, Buffer, BufferAccessMut, BufferAccessors,
-    BufferError, BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation,
-    BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder, DrainBuffer, Gate,
-    GateState, IncompatibleLayout, InspectBuffer, Joining, ManageBuffer, NotifyBufferUpdate,
-    OperationError, OperationResult, OperationRoster, OrBroken,
+    BufferError, BufferIdentifier, BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag,
+    BufferLocation, BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder,
+    CloneFromBuffer, DrainBuffer, FetchFromBuffer, Gate, GateState, IncompatibleLayout,
+    InspectBuffer, Joining, ManageBuffer, MessageTypeHint, MessageTypeHintEvaluation,
+    MessageTypeHintMap, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster,
+    OrBroken, TypeInfo,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -46,10 +48,30 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct AnyBuffer {
     pub(crate) location: BufferLocation,
+    pub(crate) join_behavior: JoinBehavior,
     pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
 }
 
 impl AnyBuffer {
+    /// Specify that you want this buffer to join by pulling an element. This is
+    /// always supported.
+    pub fn join_by_pulling(mut self) -> AnyBuffer {
+        self.join_behavior = JoinBehavior::Pull;
+        self
+    }
+
+    /// Specify that you want this buffer to join by cloning an element. This is
+    /// only supported for underlying message types that support the [`Clone`]
+    /// trait.
+    ///
+    /// If you are using the diagram workflow builder, make sure the message type
+    /// stored by this buffer has registered its [`Clone`] trait.
+    pub fn join_by_cloning(mut self) -> Option<AnyBuffer> {
+        self.interface.clone_for_join_fn()?;
+        self.join_behavior = JoinBehavior::Clone;
+        Some(self)
+    }
+
     /// The buffer ID for this key.
     pub fn id(&self) -> Entity {
         self.location.source
@@ -65,8 +87,17 @@ impl AnyBuffer {
         self.interface.message_type_id()
     }
 
+    /// Get the type name of the messages that this buffer supports.
     pub fn message_type_name(&self) -> &'static str {
         self.interface.message_type_name()
+    }
+
+    /// Get the [`TypeInfo`] of this buffer's messages.
+    pub fn message_type(&self) -> TypeInfo {
+        TypeInfo {
+            type_id: self.message_type_id(),
+            type_name: self.message_type_name(),
+        }
     }
 
     /// Get the [`AnyBufferAccessInterface`] for this specific instance of [`AnyBuffer`].
@@ -96,6 +127,7 @@ impl std::fmt::Debug for AnyBuffer {
         f.debug_struct("AnyBuffer")
             .field("scope", &self.location.scope)
             .field("source", &self.location.source)
+            .field("join_behavior", &self.join_behavior)
             .field("message_type_name", &self.interface.message_type_name())
             .finish()
     }
@@ -119,21 +151,46 @@ impl AnyBuffer {
     /// Downcast this into a different special buffer representation, such as a
     /// `JsonBuffer`.
     pub fn downcast_buffer<BufferType: 'static>(&self) -> Option<BufferType> {
-        self.interface.buffer_downcast(TypeId::of::<BufferType>())?(self.location)
+        self.interface.buffer_downcast(TypeId::of::<BufferType>())?(*self)
+            .ok()?
             .downcast::<BufferType>()
             .ok()
             .map(|x| *x)
     }
 }
 
-impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
+impl<T: 'static + Send + Sync> From<Buffer<T>> for AnyBuffer {
     fn from(value: Buffer<T>) -> Self {
         let interface = AnyBuffer::interface_for::<T>();
         AnyBuffer {
             location: value.location,
+            join_behavior: JoinBehavior::Pull,
             interface,
         }
     }
+}
+
+impl<T: 'static + Send + Sync + Clone> From<CloneFromBuffer<T>> for AnyBuffer {
+    fn from(value: CloneFromBuffer<T>) -> Self {
+        let interface = AnyBuffer::interface_for::<T>();
+        AnyBuffer {
+            location: value.location,
+            join_behavior: JoinBehavior::Clone,
+            interface,
+        }
+    }
+}
+
+/// What should the behavior be for this buffer when it gets joined? You can
+/// make copies of the [`Buffer`] reference and give each copy a different behavior
+/// so that it gets used differently for each join operation that it takes part in.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum JoinBehavior {
+    /// Pull a value from the buffer while joining
+    #[default]
+    Pull,
+    /// Clone a value from the buffer while joining
+    Clone,
 }
 
 /// A trait for turning a buffer into an [`AnyBuffer`]. It is expected that all
@@ -141,17 +198,38 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
 pub trait AsAnyBuffer {
     /// Convert this buffer into an [`AnyBuffer`].
     fn as_any_buffer(&self) -> AnyBuffer;
+
+    /// What would be the message type hint for this kind of buffer?
+    fn message_type_hint() -> MessageTypeHint;
 }
 
 impl AsAnyBuffer for AnyBuffer {
     fn as_any_buffer(&self) -> AnyBuffer {
         *self
     }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::fallback::<AnyMessageBox>()
+    }
 }
 
 impl<T: 'static + Send + Sync> AsAnyBuffer for Buffer<T> {
     fn as_any_buffer(&self) -> AnyBuffer {
         (*self).into()
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::exact::<T>()
+    }
+}
+
+impl<T: 'static + Send + Sync + Clone> AsAnyBuffer for CloneFromBuffer<T> {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        (*self).into()
+    }
+
+    fn message_type_hint() -> MessageTypeHint {
+        MessageTypeHint::exact::<T>()
     }
 }
 
@@ -258,6 +336,14 @@ impl BufferMapLayout for AnyBuffer {
         }
 
         Err(compatibility)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        evaluation.fallback::<AnyMessageBox>(0);
+        evaluation.evaluate()
     }
 }
 
@@ -738,7 +824,7 @@ fn to_any_mut<'a, T: 'static + Send + Sync + Any>(x: &'a mut T) -> AnyMessageMut
     x
 }
 
-fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessageBox {
+pub(crate) fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessageBox {
     Box::new(x)
 }
 
@@ -816,6 +902,13 @@ pub trait AnyBufferAccessInterface {
 
     fn register_buffer_downcast(&self, buffer_type: TypeId, f: BufferDowncastBox);
 
+    /// Allows AnyBuffer to support join_by_cloning
+    fn register_cloning(
+        &self,
+        clone_for_any_join: CloneForAnyFn,
+        clone_for_join_fn: &'static (dyn Any + Send + Sync),
+    );
+
     fn buffer_downcast(&self, buffer_type: TypeId) -> Option<BufferDowncastRef>;
 
     fn register_key_downcast(&self, key_type: TypeId, f: KeyDowncastBox);
@@ -827,6 +920,14 @@ pub trait AnyBufferAccessInterface {
         entity_mut: &mut EntityWorldMut,
         session: Entity,
     ) -> Result<AnyMessageBox, OperationError>;
+
+    fn clone_from_buffer(
+        &self,
+        entity_reft: &EntityRef,
+        session: Entity,
+    ) -> Result<AnyMessageBox, OperationError>;
+
+    fn clone_for_join_fn(&self) -> Option<&'static (dyn Any + Send + Sync)>;
 
     fn create_any_buffer_view<'a>(
         &self,
@@ -840,15 +941,26 @@ pub trait AnyBufferAccessInterface {
     ) -> Box<dyn AnyBufferAccessMutState>;
 }
 
-pub type BufferDowncastBox = Box<dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync>;
-pub type BufferDowncastRef = &'static (dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync);
-pub type KeyDowncastBox = Box<dyn Fn(BufferKeyTag) -> Box<dyn Any> + Send + Sync>;
-pub type KeyDowncastRef = &'static (dyn Fn(BufferKeyTag) -> Box<dyn Any> + Send + Sync);
+pub type AnyMessageResult = Result<AnyMessageBox, OperationError>;
+// TODO(@mxgrey): Consider changing this trait box into a function pointer
+pub type BufferDowncastBox = Box<dyn Fn(AnyBuffer) -> AnyMessageResult + Send + Sync>;
+pub type BufferDowncastRef = &'static (dyn Fn(AnyBuffer) -> AnyMessageResult + Send + Sync);
+pub type KeyDowncastBox = Box<dyn Fn(BufferKeyTag) -> AnyMessageBox + Send + Sync>;
+pub type KeyDowncastRef = &'static (dyn Fn(BufferKeyTag) -> AnyMessageBox + Send + Sync);
+pub type CloneForAnyFn = fn(&EntityRef, Entity) -> AnyMessageResult;
 
 struct AnyBufferAccessImpl<T> {
     buffer_downcasts: Mutex<HashMap<TypeId, BufferDowncastRef>>,
     key_downcasts: Mutex<HashMap<TypeId, KeyDowncastRef>>,
+    cloning: Mutex<Option<CloneInterfaces>>,
     _ignore: std::marker::PhantomData<fn(T)>,
+}
+
+struct CloneInterfaces {
+    clone_for_any_join: CloneForAnyFn,
+    /// Contains a function pointer that can be downcast into a type-specific
+    /// fetch_for_join function pointer for [`FetchFromBuffer`].
+    clone_for_join_fn: &'static (dyn Any + Send + Sync),
 }
 
 impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
@@ -862,22 +974,31 @@ impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
         // Automatically register a downcast into AnyBuffer
         buffer_downcasts.insert(
             TypeId::of::<AnyBuffer>(),
-            Box::leak(Box::new(|location| -> Box<dyn Any> {
-                Box::new(AnyBuffer {
-                    location,
+            Box::leak(Box::new(|buffer: AnyBuffer| -> AnyMessageResult {
+                Ok(Box::new(AnyBuffer {
+                    location: buffer.location,
+                    join_behavior: buffer.join_behavior,
                     interface: AnyBuffer::interface_for::<T>(),
-                })
+                }))
             })),
         );
 
         // Allow downcasting back to the original Buffer<T>
         buffer_downcasts.insert(
             TypeId::of::<Buffer<T>>(),
-            Box::leak(Box::new(|location| -> Box<dyn Any> {
-                Box::new(Buffer::<T> {
-                    location,
+            Box::leak(Box::new(|buffer: AnyBuffer| -> AnyMessageResult {
+                Ok(Box::new(Buffer::<T> {
+                    location: buffer.location,
                     _ignore: Default::default(),
-                })
+                }))
+            })),
+        );
+
+        // Allow downcasting to the very general FetchFromBuffer type
+        buffer_downcasts.insert(
+            TypeId::of::<FetchFromBuffer<T>>(),
+            Box::leak(Box::new(|buffer: AnyBuffer| -> AnyMessageResult {
+                Ok(Box::new(FetchFromBuffer::<T>::try_from(buffer)?))
             })),
         );
 
@@ -886,7 +1007,7 @@ impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
         // Automatically register a downcast to AnyBufferKey
         key_downcasts.insert(
             TypeId::of::<AnyBufferKey>(),
-            Box::leak(Box::new(|tag| -> Box<dyn Any> {
+            Box::leak(Box::new(|tag| -> AnyMessageBox {
                 Box::new(AnyBufferKey {
                     tag,
                     interface: AnyBuffer::interface_for::<T>(),
@@ -897,6 +1018,7 @@ impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
         Self {
             buffer_downcasts: Mutex::new(buffer_downcasts),
             key_downcasts: Mutex::new(key_downcasts),
+            cloning: Default::default(),
             _ignore: Default::default(),
         }
     }
@@ -928,6 +1050,17 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         }
     }
 
+    fn register_cloning(
+        &self,
+        clone_for_any_join: CloneForAnyFn,
+        clone_for_join_fn: &'static (dyn Any + Send + Sync),
+    ) {
+        *self.cloning.lock().unwrap() = Some(CloneInterfaces {
+            clone_for_any_join,
+            clone_for_join_fn,
+        });
+    }
+
     fn buffer_downcast(&self, buffer_type: TypeId) -> Option<BufferDowncastRef> {
         self.buffer_downcasts
             .lock()
@@ -957,6 +1090,29 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         entity_mut
             .pull_from_buffer::<T>(session)
             .map(to_any_message)
+    }
+
+    fn clone_from_buffer(
+        &self,
+        entity_ref: &EntityRef,
+        session: Entity,
+    ) -> Result<AnyMessageBox, OperationError> {
+        let f = self
+            .cloning
+            .lock()
+            .unwrap()
+            .as_ref()
+            .or_broken()?
+            .clone_for_any_join;
+        f(entity_ref, session)
+    }
+
+    fn clone_for_join_fn(&self) -> Option<&'static (dyn Any + Send + Sync)> {
+        self.cloning
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.clone_for_join_fn)
     }
 
     fn create_any_buffer_view<'a>(
@@ -1067,9 +1223,21 @@ impl Buffering for AnyBuffer {
 
 impl Joining for AnyBuffer {
     type Item = AnyMessageBox;
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
-        self.interface.pull(&mut buffer_mut, session)
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
+        match self.join_behavior {
+            JoinBehavior::Pull => {
+                let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
+                self.interface.pull(&mut buffer_mut, session)
+            }
+            JoinBehavior::Clone => {
+                let buffer_ref = world.get_entity(self.id()).or_broken()?;
+                self.interface.clone_from_buffer(&buffer_ref, session)
+            }
+        }
     }
 }
 

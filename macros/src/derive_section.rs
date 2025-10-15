@@ -46,7 +46,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
     let register_serialize = gen_register_serialize(&field_configs);
     let register_fork_clone = gen_register_fork_clone(&field_configs);
     let register_unzip = gen_register_unzip(&field_configs);
-    let register_fork_result = gen_register_fork_result(&field_configs);
+    let register_result = gen_register_result(&field_configs);
     let register_split = gen_register_split(&field_configs);
     let register_join = gen_register_join(&field_configs);
     let register_buffer_access = gen_register_buffer_access(&field_configs);
@@ -85,7 +85,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
                     #register_message
 
                     #register_unzip
-                    #register_fork_result
+                    #register_result
                     #register_split
                     #register_join
                     #register_buffer_access
@@ -235,13 +235,13 @@ fn gen_register_unzip(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream> {
         .collect()
 }
 
-fn gen_register_fork_result(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream> {
+fn gen_register_result(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream> {
     fields
         .into_iter()
         .map(|(config, span)| {
             if config.fork_result {
                 quote_spanned! {*span=>
-                    _message.with_fork_result();
+                    _message.with_result();
                 }
             } else {
                 TokenStream::new()

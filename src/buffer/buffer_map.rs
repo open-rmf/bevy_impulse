@@ -15,7 +15,10 @@
  *
 */
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use thiserror::Error as ThisError;
 
@@ -25,22 +28,53 @@ use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
     add_listener_to_source, Accessing, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
-    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, Gate, GateState,
-    Joining, Node, OperationError, OperationResult, OperationRoster,
+    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, CloneFromBuffer,
+    FetchFromBuffer, Gate, GateState, Joining, Node, OperationError, OperationResult,
+    OperationRoster, TypeInfo,
 };
 
 pub use bevy_impulse_derive::{Accessor, Joined};
+
+#[cfg(feature = "diagram")]
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "diagram")]
+use schemars::JsonSchema;
 
 use super::BufferKey;
 
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(Serialize, Deserialize, JsonSchema),
+    serde(untagged)
+)]
 pub enum BufferIdentifier<'a> {
     /// Identify a buffer by name
     Name(Cow<'a, str>),
     /// Identify a buffer by an index value
     Index(usize),
+}
+
+impl<'a> BufferIdentifier<'a> {
+    pub fn is_name(&self) -> bool {
+        matches!(self, Self::Name(_))
+    }
+
+    pub fn is_index(&self) -> bool {
+        matches!(self, Self::Index(_))
+    }
+}
+
+impl<'a> std::fmt::Display for BufferIdentifier<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Name(name) => write!(f, "\"{name}\""),
+            Self::Index(index) => write!(f, "#{index}"),
+        }
+    }
 }
 
 impl BufferIdentifier<'static> {
@@ -63,6 +97,12 @@ impl BufferIdentifier<'static> {
 impl<'a> From<&'a str> for BufferIdentifier<'a> {
     fn from(value: &'a str) -> Self {
         BufferIdentifier::Name(Cow::Borrowed(value))
+    }
+}
+
+impl From<String> for BufferIdentifier<'static> {
+    fn from(value: String) -> Self {
+        BufferIdentifier::Name(Cow::Owned(value))
     }
 }
 
@@ -153,8 +193,8 @@ impl IncompatibleLayout {
             } else {
                 self.incompatible_buffers.push(BufferIncompatibility {
                     identifier,
-                    expected: std::any::type_name::<BufferType>(),
-                    received: buffer.message_type_name(),
+                    expected_buffer: std::any::type_name::<BufferType>(),
+                    received_message_type: buffer.message_type_name(),
                 });
             }
         } else {
@@ -179,8 +219,8 @@ impl IncompatibleLayout {
             } else {
                 self.incompatible_buffers.push(BufferIncompatibility {
                     identifier: BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())),
-                    expected: std::any::type_name::<BufferType>(),
-                    received: buffer.message_type_name(),
+                    expected_buffer: std::any::type_name::<BufferType>(),
+                    received_message_type: buffer.message_type_name(),
                 });
             }
         } else {
@@ -198,10 +238,101 @@ pub struct BufferIncompatibility {
     /// Name of the expected buffer
     pub identifier: BufferIdentifier<'static>,
     /// The type that was expected for this buffer
-    pub expected: &'static str,
+    pub expected_buffer: &'static str,
     /// The type that was received for this buffer
-    pub received: &'static str,
-    // TODO(@mxgrey): Replace TypeId with TypeInfo
+    pub received_message_type: &'static str,
+}
+
+/// A helper struct for putting together buffer type hint maps
+pub struct MessageTypeHintEvaluation {
+    /// Identifiers that have not been evaluated yet
+    unevaluated: HashSet<BufferIdentifier<'static>>,
+    evaluated: MessageTypeHintMap,
+    compatibility: IncompatibleLayout,
+}
+
+impl MessageTypeHintEvaluation {
+    /// Begin a new message type hint evaluation
+    pub fn new(identifiers: HashSet<BufferIdentifier<'static>>) -> Self {
+        Self {
+            unevaluated: identifiers,
+            evaluated: Default::default(),
+            compatibility: Default::default(),
+        }
+    }
+
+    /// Get the next identifier that has not been evaluated
+    pub fn next_unevaluated(&self) -> Option<BufferIdentifier<'static>> {
+        self.unevaluated.iter().next().cloned()
+    }
+
+    /// Get the next identifier that has not been evaluated, as long as it is
+    /// an index. Any identifiers that are not indices will be put into the
+    /// forbidden identifiers list and this evaluation will produce an Err.
+    pub fn next_index_required(&mut self) -> Option<BufferIdentifier<'static>> {
+        self.unevaluated.retain(|identifier| {
+            let is_index = identifier.is_index();
+            if !is_index {
+                self.compatibility
+                    .forbidden_buffers
+                    .push(identifier.clone());
+            }
+
+            is_index
+        });
+
+        self.next_unevaluated()
+    }
+
+    /// Similar to [`Self::next_index_required`], but requires a name instead of
+    /// an index.
+    pub fn next_name_required(&mut self) -> Option<BufferIdentifier<'static>> {
+        self.unevaluated.retain(|identifier| {
+            let is_name = identifier.is_name();
+            if !is_name {
+                self.compatibility
+                    .forbidden_buffers
+                    .push(identifier.clone());
+            }
+
+            is_name
+        });
+
+        self.next_unevaluated()
+    }
+
+    /// Indicate the exact message type hint of a certain identifier
+    pub fn exact<T: 'static>(&mut self, identifier: impl Into<BufferIdentifier<'static>>) {
+        self.set_hint(identifier, MessageTypeHint::exact::<T>());
+    }
+
+    /// Indicate a fallback message type hint of a certain identifier
+    pub fn fallback<T: 'static>(&mut self, identifier: impl Into<BufferIdentifier<'static>>) {
+        self.set_hint(identifier, MessageTypeHint::fallback::<T>());
+    }
+
+    /// Set the hint of a certain identifier directly
+    pub fn set_hint(
+        &mut self,
+        identifier: impl Into<BufferIdentifier<'static>>,
+        hint: MessageTypeHint,
+    ) {
+        let identifier = identifier.into();
+        if !self.unevaluated.remove(&identifier) {
+            self.compatibility.missing_buffers.push(identifier);
+            return;
+        }
+        self.evaluated.insert(identifier, hint);
+    }
+
+    /// Evaluate the message type hints
+    pub fn evaluate(mut self) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        self.compatibility
+            .forbidden_buffers
+            .extend(self.unevaluated.into_iter());
+        self.compatibility.as_result()?;
+        Ok(self.evaluated)
+    }
 }
 
 /// This trait can be implemented on structs that represent a layout of buffers.
@@ -211,7 +342,63 @@ pub struct BufferIncompatibility {
 pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
     /// Try to convert a generic [`BufferMap`] into this specific layout.
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout>;
+
+    /// Get a hint for what message type should be used for a certain buffer in
+    /// this layout. This is used by the diagram builder to infer the message
+    /// types of buffers who do not have any messages pushed into them directly
+    /// as input.
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout>;
 }
+
+/// This hint is used by the diagram builder to assign types to buffers who do
+/// not have any messages pushed into them directly as input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MessageTypeHint {
+    /// An accessor is asking specifically for this type T via `BufferKey<T>`
+    Exact(TypeInfo),
+    /// An accessor is using a generalized buffer, e.g. JsonBuffer or AnyBuffer,
+    /// which can be represented by this type, but an exact type should be used
+    /// if any other accessor has one.
+    Fallback(TypeInfo),
+}
+
+impl std::fmt::Display for MessageTypeHint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageTypeHint::Exact(info) => write!(f, "Exact({})", info.type_name),
+            MessageTypeHint::Fallback(info) => write!(f, "Fallback({})", info.type_name),
+        }
+    }
+}
+
+impl MessageTypeHint {
+    pub fn exact<T: 'static>() -> Self {
+        Self::Exact(TypeInfo::of::<T>())
+    }
+
+    pub fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
+
+    pub fn as_exact(&self) -> Option<TypeInfo> {
+        match self {
+            Self::Exact(info) => Some(*info),
+            _ => None,
+        }
+    }
+
+    pub fn fallback<T: 'static>() -> Self {
+        Self::Fallback(TypeInfo::of::<T>())
+    }
+
+    pub fn is_fallback(&self) -> bool {
+        matches!(self, Self::Fallback(_))
+    }
+}
+
+pub type MessageTypeHintMap = HashMap<BufferIdentifier<'static>, MessageTypeHint>;
 
 /// This trait helps auto-generated buffer map structs to implement the Buffering
 /// trait.
@@ -461,6 +648,20 @@ impl BufferMapLayout for BufferMap {
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
         Ok(buffers.clone())
     }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        // We have no information available at compile time about what the right
+        // identifiers are or what the messages types should be. BufferMap can
+        // support anything.
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        while let Some(identifier) = evaluation.next_unevaluated() {
+            evaluation.fallback::<AnyMessageBox>(identifier);
+        }
+
+        evaluation.evaluate()
+    }
 }
 
 impl BufferMapStruct for BufferMap {
@@ -472,10 +673,14 @@ impl BufferMapStruct for BufferMap {
 impl Joining for BufferMap {
     type Item = HashMap<BufferIdentifier<'static>, AnyMessageBox>;
 
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+    fn fetch_for_join(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
         let mut value = HashMap::new();
         for (name, buffer) in self.iter() {
-            value.insert(name.clone(), buffer.pull(session, world)?);
+            value.insert(name.clone(), buffer.fetch_for_join(session, world)?);
         }
 
         Ok(value)
@@ -543,6 +748,54 @@ impl<T: 'static + Send + Sync> BufferMapLayout for Buffer<T> {
 
         Err(compatibility)
     }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        evaluation.exact::<T>(0);
+        evaluation.evaluate()
+    }
+}
+
+impl<T: 'static + Send + Sync + Clone> BufferMapLayout for CloneFromBuffer<T> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut compatibility = IncompatibleLayout::default();
+
+        if let Ok(downcast_buffer) =
+            compatibility.require_buffer_for_identifier::<CloneFromBuffer<T>>(0, buffers)
+        {
+            return Ok(downcast_buffer);
+        }
+
+        Err(compatibility)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        Buffer::<T>::get_buffer_message_type_hints(identifiers)
+    }
+}
+
+impl<T: 'static + Send + Sync> BufferMapLayout for FetchFromBuffer<T> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut compatibility = IncompatibleLayout::default();
+
+        if let Ok(downcast_buffer) =
+            compatibility.require_buffer_for_identifier::<FetchFromBuffer<T>>(0, buffers)
+        {
+            return Ok(downcast_buffer);
+        }
+
+        Err(compatibility)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        Buffer::<T>::get_buffer_message_type_hints(identifiers)
+    }
 }
 
 impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> {
@@ -557,6 +810,16 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> 
 
         compatibility.as_result()?;
         Ok(downcast_buffers)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        while let Some(identifier) = evaluation.next_index_required() {
+            evaluation.set_hint(identifier, B::message_type_hint());
+        }
+        evaluation.evaluate()
     }
 }
 
@@ -578,6 +841,16 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLa
 
         compatibility.as_result()?;
         Ok(downcast_buffers)
+    }
+
+    fn get_buffer_message_type_hints(
+        identifiers: HashSet<BufferIdentifier<'static>>,
+    ) -> Result<MessageTypeHintMap, IncompatibleLayout> {
+        let mut evaluation = MessageTypeHintEvaluation::new(identifiers);
+        while let Some(identifier) = evaluation.next_index_required() {
+            evaluation.set_hint(identifier, B::message_type_hint());
+        }
+        evaluation.evaluate()
     }
 }
 
@@ -667,7 +940,7 @@ mod tests {
                 buffer_f64,
                 buffer_string,
                 buffer_generic,
-                buffer_any.into(),
+                buffer_any,
             );
 
             builder.join(buffers).connect(scope.terminate);
@@ -723,7 +996,7 @@ mod tests {
             |scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
                 let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
                     a: builder.create_buffer(BufferSettings::default()),
-                    b: builder.create_buffer(BufferSettings::default()),
+                    b: builder.create_buffer(BufferSettings::default()).into(),
                 };
 
                 let copy = multi_generic_buffers;
