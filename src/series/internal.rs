@@ -35,33 +35,33 @@ use crate::{
     OperationSetup, SetupFailure, SingleTargetStorage, UnhandledErrors, UnusedTarget,
 };
 
-pub(crate) trait Impulsive {
+pub(crate) trait Executable {
     fn setup(self, info: OperationSetup) -> OperationResult;
     fn execute(request: OperationRequest) -> OperationResult;
 }
 
 #[derive(Component)]
-pub(crate) struct ImpulseMarker;
+pub(crate) struct SeriesMarker;
 
-pub(crate) struct AddImpulse<I: Impulsive> {
+pub(crate) struct AddExecution<E: Executable> {
     source: Option<Entity>,
     target: Entity,
-    impulse: I,
+    execution: E,
 }
 
-impl<I: Impulsive> AddImpulse<I> {
-    pub(crate) fn new(source: Option<Entity>, target: Entity, impulse: I) -> Self {
+impl<E: Executable> AddExecution<E> {
+    pub(crate) fn new(source: Option<Entity>, target: Entity, execution: E) -> Self {
         Self {
             source,
             target,
-            impulse,
+            execution,
         }
     }
 }
 
-impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
+impl<I: Executable + 'static + Sync + Send> Command for AddExecution<I> {
     fn apply(self, world: &mut World) {
-        if let Err(error) = self.impulse.setup(OperationSetup {
+        if let Err(error) = self.execution.setup(OperationSetup {
             source: self.target,
             world,
         }) {
@@ -76,9 +76,9 @@ impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
         world
             .entity_mut(self.target)
             .insert((
-                OperationExecuteStorage(perform_impulse::<I>),
-                Cancellable::new(cancel_impulse),
-                ImpulseMarker,
+                OperationExecuteStorage(perform_execution::<I>),
+                Cancellable::new(cancel_execution),
+                SeriesMarker,
             ))
             .remove::<UnusedTarget>();
 
@@ -88,7 +88,7 @@ impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
     }
 }
 
-fn perform_impulse<I: Impulsive>(
+fn perform_execution<I: Executable>(
     OperationRequest {
         source,
         world,
@@ -131,14 +131,14 @@ fn perform_impulse<I: Impulsive>(
     }
 }
 
-pub(crate) fn cancel_impulse(
+pub(crate) fn cancel_execution(
     OperationCancel {
         cancel,
         world,
         roster,
     }: OperationCancel,
 ) -> OperationResult {
-    // We cancel an impulse by travelling to its terminal and
+    // We cancel a series by travelling to its terminal and
     let mut terminal = cancel.target;
     loop {
         let Some(target) = world.get::<SingleTargetStorage>(terminal) else {
@@ -181,12 +181,12 @@ pub(crate) fn cancel_impulse(
 pub(crate) struct OnTerminalCancelled(pub(crate) fn(OperationCancel) -> OperationResult);
 
 #[derive(Resource)]
-pub(crate) struct ImpulseLifecycleChannel {
+pub(crate) struct SeriesLifecycleChannel {
     pub(crate) sender: TokioSender<Entity>,
     pub(crate) receiver: TokioReceiver<Entity>,
 }
 
-impl Default for ImpulseLifecycleChannel {
+impl Default for SeriesLifecycleChannel {
     fn default() -> Self {
         let (sender, receiver) = unbounded_channel();
         Self { sender, receiver }
@@ -194,18 +194,18 @@ impl Default for ImpulseLifecycleChannel {
 }
 
 /// This component tracks the lifecycle of an entity that is the terminal
-/// target of an impulse chain. When this component gets dropped, the upstream
+/// target of a series. When this component gets dropped, the upstream
 /// chain will be notified.
 #[derive(Component)]
-pub(crate) struct ImpulseLifecycle {
-    /// The impulse sources that are feeding into the entity which holds this
+pub(crate) struct SeriesLifecycle {
+    /// The series sources that are feeding into the entity which holds this
     /// component.
     sources: SmallVec<[Entity; 8]>,
     /// Used to notify the flusher that the target of the sources has been dropped
     sender: TokioSender<Entity>,
 }
 
-impl ImpulseLifecycle {
+impl SeriesLifecycle {
     fn new(source: Entity, sender: TokioSender<Entity>) -> Self {
         Self {
             sources: SmallVec::from_iter([source]),
@@ -214,12 +214,12 @@ impl ImpulseLifecycle {
     }
 }
 
-impl Drop for ImpulseLifecycle {
+impl Drop for SeriesLifecycle {
     fn drop(&mut self) {
         for source in &self.sources {
             if let Err(err) = self.sender.send(*source) {
                 eprintln!(
-                    "Failed to notify that an impulse was dropped: {err}\nBacktrace:\n{:#?}",
+                    "Failed to notify that a series was dropped: {err}\nBacktrace:\n{:#?}",
                     Backtrace::new(),
                 );
             }
@@ -229,14 +229,14 @@ impl Drop for ImpulseLifecycle {
 
 pub(crate) fn add_lifecycle_dependency(source: Entity, target: Entity, world: &mut World) {
     let sender = world
-        .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
+        .get_resource_or_insert_with(SeriesLifecycleChannel::default)
         .sender
         .clone();
 
-    if let Some(mut lifecycle) = world.get_mut::<ImpulseLifecycle>(target) {
+    if let Some(mut lifecycle) = world.get_mut::<SeriesLifecycle>(target) {
         lifecycle.sources.push(source);
     } else if let Ok(mut target_mut) = world.get_entity_mut(target) {
-        target_mut.insert(ImpulseLifecycle::new(source, sender));
+        target_mut.insert(SeriesLifecycle::new(source, sender));
     } else {
         // The target is already despawned
         if let Err(err) = sender.send(source) {

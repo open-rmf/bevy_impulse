@@ -28,7 +28,7 @@ use super::{
     OperationRef, Operations, RedirectConnection, TraceInfo, TraceSettings, TypeInfo,
 };
 
-pub use bevy_impulse_derive::Section;
+pub use crossflow_derive::Section;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -40,7 +40,7 @@ pub enum SectionProvider {
 /// Connect the request to a registered section.
 ///
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "section_op",
@@ -60,7 +60,7 @@ pub enum SectionProvider {
 ///
 /// Custom sections can also be created via templates
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "templates": {

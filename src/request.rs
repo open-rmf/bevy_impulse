@@ -24,22 +24,24 @@ use bevy_ecs::{
 use std::future::Future;
 
 use crate::{
-    cancel_impulse, Cancellable, Detached, Impulse, ImpulseMarker, InputCommand, IntoAsyncMap,
-    IntoBlockingMapOnce, ProvideOnce, SessionStatus, StreamPack, UnusedTarget,
+    cancel_execution, Cancellable, Detached, InputCommand, IntoAsyncMap, IntoBlockingMapOnce,
+    ProvideOnce, Series, SeriesMarker, SessionStatus, StreamPack, UnusedTarget,
 };
 
-/// Extensions for creating impulse chains by making a request to a provider or
+/// Extensions for creating a series of execution by making a request to a provider or
 /// serving a value. This is implemented for [`Commands`].
 pub trait RequestExt<'w, 's> {
-    /// Call this on [`Commands`] to trigger an [impulse](Impulse) to fire.
+    /// Call this on [`Commands`] to begin creating a [series](Series).
     ///
-    /// Impulses are one-time requests that you can send to a provider. Impulses
-    /// can be chained together as a sequence, but you should end the sequence
-    /// by [taking][1] the response, [detaching][2] the impulse, or using one of
-    /// the other terminating operations mentioned in [the chart](Impulse::detach).
+    /// A series is a one-time chain of requests where the output of each request
+    /// feeds into the input of the next. You should end the series by [taking][1]
+    /// the response, [detaching][2] the series, or using one of the other terminating
+    /// operations mentioned in [the chart](Series::detach). You can do a single
+    /// request (instead of a chain) by just taking the response immediately after
+    /// the first request.
     ///
     /// ```
-    /// use bevy_impulse::{prelude::*, testing::*};
+    /// use crossflow::{prelude::*, testing::*};
     /// let mut context = TestingContext::minimal_plugins();
     /// let mut promise = context.command(|commands| {
     ///     let service = commands.spawn_service(spawn_test_entities);
@@ -50,32 +52,31 @@ pub trait RequestExt<'w, 's> {
     /// assert!(promise.peek().is_available());
     /// ```
     ///
-    /// [1]: Impulse::take
-    /// [2]: Impulse::detach
+    /// [1]: Series::take
+    /// [2]: Series::detach
     #[must_use]
     fn request<'a, P: ProvideOnce>(
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Impulse<'w, 's, 'a, P::Response, P::Streams>
+    ) -> Series<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack;
 
-    /// Call this on [`Commands`] to begin building an impulse chain from a
-    /// value without calling any provider.
-    fn provide<'a, T: 'static + Send + Sync>(&'a mut self, value: T) -> Impulse<'w, 's, 'a, T, ()> {
+    /// Call this on [`Commands`] to begin building a series from a value without
+    /// calling any provider.
+    fn provide<'a, T: 'static + Send + Sync>(&'a mut self, value: T) -> Series<'w, 's, 'a, T, ()> {
         self.request(value, provide_value.into_blocking_map_once())
     }
 
-    /// Call this on [`Commands`] to begin building an impulse chain from a
-    /// [`Future`] whose [`Future::Output`] will be the item provided to the
-    /// target.
+    /// Call this on [`Commands`] to begin building a series from a [`Future`]
+    /// whose [`Future::Output`] will be the item provided to the target.
     fn serve<'a, T: 'static + Send + Sync + Future>(
         &'a mut self,
         future: T,
-    ) -> Impulse<'w, 's, 'a, T::Output, ()>
+    ) -> Series<'w, 's, 'a, T::Output, ()>
     where
         T::Output: 'static + Send + Sync,
     {
@@ -88,20 +89,20 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Impulse<'w, 's, 'a, P::Response, P::Streams>
+    ) -> Series<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
     {
         let target = self
-            .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
+            .spawn((Detached::default(), UnusedTarget, SeriesMarker))
             .id();
 
         let source = self
             .spawn((
-                Cancellable::new(cancel_impulse),
-                ImpulseMarker,
+                Cancellable::new(cancel_execution),
+                SeriesMarker,
                 SessionStatus::Active,
             ))
             // We set the parent of this source to the target so that when the
@@ -116,7 +117,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             data: request,
         });
 
-        Impulse {
+        Series {
             source,
             target,
             commands: self,

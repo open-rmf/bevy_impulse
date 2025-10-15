@@ -28,7 +28,7 @@ export class NodeManager {
         this.namespacedOpIdMap.set(node.id, node);
       } else if (node.type === 'sectionOutput') {
         // This will conflict if there is an op in a template with the same id as an output.
-        // However, this conflict exist in bevy_impulse as well, so we assume that it will not happen.
+        // However, this conflict exist in crossflow as well, so we assume that it will not happen.
         this.namespacedOpIdMap.set(
           joinNamespaces(ROOT_NAMESPACE, node.data.outputId),
           node,

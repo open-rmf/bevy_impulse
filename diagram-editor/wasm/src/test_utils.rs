@@ -1,11 +1,11 @@
-use bevy_impulse::{DiagramElementRegistry, ImpulseAppPlugin, NodeBuilderOptions};
-use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
+use crossflow::{CrossflowExecutorApp, DiagramElementRegistry, NodeBuilderOptions};
+use crossflow_diagram_editor::api::executor::ExecutorOptions;
 
 use super::{init_wasm, setup_wasm, InitOptions};
 
 init_wasm! {
     let mut app = bevy_app::SubApp::new();
-    app.add_plugins(ImpulseAppPlugin::default());
+    app.add_plugins(CrossflowExecutorApp::default());
 
     let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(NodeBuilderOptions::new("add3"), |builder, _config: ()| {

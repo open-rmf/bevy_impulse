@@ -15,21 +15,21 @@
  *
 */
 
-use crate::{Impulsive, OperationRequest, OperationResult, OperationSetup, OrBroken};
+use crate::{Executable, OperationRequest, OperationResult, OperationSetup, OrBroken};
 
-/// During an impulse flush, this impulse gets automatically added to the end of
+/// During an execution flush, this executable gets automatically added to the end of
 /// any chain which has an unused target but was also marked as detached. This
 /// simply takes care of automatically cleaning up the chain when it's finished.
 pub(crate) struct Finished;
 
-impl Impulsive for Finished {
+impl Executable for Finished {
     fn setup(self, _: OperationSetup) -> OperationResult {
         // Do nothing
         Ok(())
     }
 
     fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
-        // If this gets triggered that means the impulse chain is finished
+        // If this gets triggered that means the series is finished
         world.get_entity_mut(source).or_broken()?.despawn();
         Ok(())
     }

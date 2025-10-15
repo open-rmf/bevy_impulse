@@ -32,10 +32,10 @@ use smallvec::SmallVec;
 use crate::{
     Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput, BlockingMap,
     BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable, Buffering, Builder,
-    ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, ImpulseAppPlugin, Joining, OperationError, OperationResult,
-    OperationRoster, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf,
-    StreamPack, UnhandledErrors, WorkflowSettings,
+    ContinuousQuery, ContinuousQueueView, ContinuousService, CrossflowExecutorApp, FlushParameters,
+    GetBufferedSessionsFn, Joining, OperationError, OperationResult, OperationRoster, Promise,
+    RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors,
+    WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -43,11 +43,11 @@ pub struct TestingContext {
 }
 
 impl TestingContext {
-    /// Make a testing context with the minimum plugins needed for bevy_impulse
+    /// Make a testing context with the minimum plugins needed for crossflow
     /// to work properly.
     pub fn minimal_plugins() -> Self {
         let mut app = App::new();
-        app.add_plugins((ImpulseAppPlugin::default(), TimePlugin));
+        app.add_plugins((CrossflowExecutorApp::default(), TimePlugin));
 
         TestingContext { app }
     }

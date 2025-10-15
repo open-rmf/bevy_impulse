@@ -33,7 +33,7 @@ use crate::{
     OperationRoster, TypeInfo,
 };
 
-pub use bevy_impulse_derive::{Accessor, Joined};
+pub use crossflow_derive::{Accessor, Joined};
 
 #[cfg(feature = "diagram")]
 use serde::{Deserialize, Serialize};
@@ -168,7 +168,7 @@ impl IncompatibleLayout {
     /// directly as the identifier.
     ///
     /// ```
-    /// # use bevy_impulse::prelude::*;
+    /// # use crossflow::prelude::*;
     ///
     /// let buffer_map = BufferMap::default();
     /// let mut compatibility = IncompatibleLayout::default();
@@ -502,7 +502,7 @@ impl<T: BufferMapStruct> Buffering for T {
 /// use `#[derive(Joined)]`:
 ///
 /// ```
-/// use bevy_impulse::prelude::*;
+/// use crossflow::prelude::*;
 ///
 /// #[derive(Joined)]
 /// struct SomeValues {
@@ -521,7 +521,7 @@ impl<T: BufferMapStruct> Buffering for T {
 /// it a name you can use #[joined(buffers_struct_name = ...)]`:
 ///
 /// ```
-/// # use bevy_impulse::prelude::*;
+/// # use crossflow::prelude::*;
 ///
 /// #[derive(Joined)]
 /// #[joined(buffers_struct_name = SomeBuffers)]
@@ -538,7 +538,7 @@ impl<T: BufferMapStruct> Buffering for T {
 /// but you probably really want it to have an [`AnyBuffer`]:
 ///
 /// ```
-/// # use bevy_impulse::prelude::*;
+/// # use crossflow::prelude::*;
 ///
 /// #[derive(Joined)]
 /// struct SomeValues {
@@ -580,7 +580,7 @@ pub trait Joined: 'static + Send + Sync + Sized {
 /// `#[derive(Accessor)]` to it, e.g.:
 ///
 /// ```
-/// use bevy_impulse::prelude::*;
+/// use crossflow::prelude::*;
 ///
 /// #[derive(Clone, Accessor)]
 /// struct SomeKeys {
@@ -595,7 +595,7 @@ pub trait Joined: 'static + Send + Sync + Sized {
 /// directly, but if you want to give it a name you can use `#[key(buffers_struct_name = ...)]`:
 ///
 /// ```
-/// # use bevy_impulse::prelude::*;
+/// # use crossflow::prelude::*;
 ///
 /// #[derive(Clone, Accessor)]
 /// #[key(buffers_struct_name = SomeBuffers)]

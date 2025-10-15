@@ -17,22 +17,24 @@
 
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::Res;
-use bevy_impulse::prelude::*;
 use bevy_time::{Time, TimePlugin};
 use clap::Parser;
+use crossflow::prelude::*;
 use std::collections::HashSet;
 use tracing::error;
 use zenoh_examples::protos;
 
-use zenoh_examples::{zenoh_publisher_node, zenoh_subscription_node, ArcError, ZenohImpulsePlugin};
+use zenoh_examples::{
+    zenoh_publisher_node, zenoh_subscription_node, ArcError, ZenohCrossflowPlugin,
+};
 
 fn main() {
     let args = Args::parse();
 
     let mut app = App::new();
     app.add_plugins((
-        ImpulseAppPlugin::default(),
-        ZenohImpulsePlugin::default(),
+        CrossflowExecutorApp::default(),
+        ZenohCrossflowPlugin::default(),
         TimePlugin::default(),
     ));
 

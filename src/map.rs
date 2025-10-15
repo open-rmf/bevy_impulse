@@ -38,25 +38,25 @@ pub struct MapDef<F>(F);
 /// * **Async**: A function that takes a single input and returns something that implements the [`Future`] trait.
 ///   The [`Future`] will be executed in the [`AsyncComputeTaskPool`][7] unless the `single_threaded_async` feature is active.
 ///
-/// If you want to insert a map into a workflow or impulse chain, you can pass your function into one of the following,
+/// If you want to insert a map into a workflow or series, you can pass your function into one of the following,
 /// depending on whether you want blocking or async:
 /// * **Blocking**
 ///   * [`Chain::map_block`](crate::Chain::map_block)
 ///   * [`Chain::map_block_node`](crate::Chain::map_block_node)
 ///   * [`Builder::create_map_block`](crate::Builder::create_map_block)
-///   * [`Impulse::map_block`](crate::Impulse::map_block)
+///   * [`Series::map_block`](crate::Series::map_block)
 /// * **Async**
 ///   * [`Chain::map_async`](crate::Chain::map_async)
 ///   * [`Chain::map_async_node`](crate::Chain::map_async_node)
 ///   * [`Builder::create_map_async`](crate::Builder::create_map_async)
-///   * [`Impulse::map_async`](crate::Impulse::map_async)
+///   * [`Series::map_async`](crate::Series::map_async)
 ///
 /// If you want your map to emit streams, you will need your input argument to be
 /// [`BlockingMap`] or [`AsyncMap`]. In that case you need to use one of the following:
 ///
 /// * [`Chain::map`](crate::Chain::map)
 /// * [`Builder::create_map`](crate::Builder::create_map)
-/// * [`Impulse::map`](crate::Impulse::map)
+/// * [`Series::map`](crate::Series::map)
 ///
 /// You can also use [`.as_map`][1], [`.into_blocking_map`][2], [`.into_async_map`][3]
 /// to convert a suitable function into a [`Provider`] that can be passed into

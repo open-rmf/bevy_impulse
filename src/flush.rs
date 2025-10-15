@@ -31,10 +31,10 @@ use backtrace::Backtrace;
 use std::sync::Arc;
 
 use crate::{
-    awaken_task, dispose_for_despawned_service, execute_operation, AddImpulse, ChannelQueue,
-    Detached, DisposalNotice, Finished, FlushWarning, ImpulseLifecycleChannel,
-    MiscellaneousFailure, OperationError, OperationRequest, OperationRoster, ServiceHook,
-    ServiceLifecycle, ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
+    awaken_task, dispose_for_despawned_service, execute_operation, AddExecution, ChannelQueue,
+    Detached, DisposalNotice, Finished, FlushWarning, MiscellaneousFailure, OperationError,
+    OperationRequest, OperationRoster, SeriesLifecycleChannel, ServiceHook, ServiceLifecycle,
+    ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
     ValidateScopeReachability, ValidationRequest, WakeQueue,
 };
 
@@ -57,7 +57,7 @@ pub struct FlushParameters {
     /// A value of `None` means the flush can loop indefinitely (this is the default).
     pub flush_loop_limit: Option<usize>,
     /// When using the single_threaded_async feature, async futures get polled
-    /// during the impulse flush. If async futures repeatedly spawn more async
+    /// during the execution flush. If async futures repeatedly spawn more async
     /// tasks then the flush could get stuck in a loop. This parameter lets you
     /// put a limit on how many futures get polled so that the flush cannot get
     /// stuck.
@@ -83,11 +83,11 @@ impl FlushParameters {
     }
 }
 
-pub fn flush_impulses() -> ScheduleConfigs<ScheduleSystem> {
-    flush_impulses_impl.into_configs()
+pub fn flush_execution() -> ScheduleConfigs<ScheduleSystem> {
+    flush_execution_impl.into_configs()
 }
 
-fn flush_impulses_impl(
+fn flush_execution_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
@@ -262,16 +262,15 @@ fn collect_from_channels(
     }
 
     for e in add_finish {
-        // Add a Finished impulse to the unused target of a detached impulse
-        // chain.
-        AddImpulse::new(None, e, Finished).apply(world);
+        // Add a Finished execution to the unused target of a detached series.
+        AddExecution::new(None, e, Finished).apply(world);
     }
 
     for target in drop_targets.drain(..) {
         drop_target(target, world, roster, true);
     }
 
-    let mut lifecycles = world.get_resource_or_insert_with(ImpulseLifecycleChannel::default);
+    let mut lifecycles = world.get_resource_or_insert_with(SeriesLifecycleChannel::default);
     let mut dropped_targets: SmallVec<[Entity; 8]> = SmallVec::new();
     while let Ok(dropped_target) = lifecycles.receiver.try_recv() {
         dropped_targets.push(dropped_target);
@@ -328,37 +327,37 @@ fn collect_from_channels(
 
 fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, unused: bool) {
     roster.purge(target);
-    let mut dropped_impulses = Vec::new();
-    let mut detached_impulse = None;
+    let mut dropped_series = Vec::new();
+    let mut detached_series = None;
 
-    let mut impulse = target;
+    let mut execution = target;
     let mut search_state: SystemState<(Query<&Children>, Query<&Detached>)> =
         SystemState::new(world);
 
     let (q_children, q_detached) = search_state.get(world);
     loop {
         let mut move_up_chain = false;
-        if let Ok(children) = q_children.get(impulse) {
+        if let Ok(children) = q_children.get(execution) {
             for child in children {
                 let Ok(detached) = q_detached.get(*child) else {
                     continue;
                 };
                 if detached.is_detached() {
                     // This child is detached so we will not include it in the
-                    // dropped impulses. We need to de-parent it so that it does
-                    // not get despawned with the rest of the impulses that we
+                    // dropped series. We need to de-parent it so that it does
+                    // not get despawned with the rest of the series that we
                     // are dropping.
-                    detached_impulse = Some(*child);
+                    detached_series = Some(*child);
                     break;
                 } else {
                     // This child is not detached, so we will include it in our
-                    // dropped impulses, and crawl towards one of it children.
+                    // dropped series, and crawl towards one of it children.
                     if unused {
-                        dropped_impulses.push(impulse);
+                        dropped_series.push(execution);
                     }
-                    roster.purge(impulse);
+                    roster.purge(execution);
                     move_up_chain = true;
-                    impulse = *child;
+                    execution = *child;
                     continue;
                 }
             }
@@ -370,9 +369,9 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
         }
     }
 
-    if let Some(detached_impulse) = detached_impulse {
-        if let Ok(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
-            detached_impulse_mut.remove::<ChildOf>();
+    if let Some(detached_series) = detached_series {
+        if let Ok(mut detached_series_mut) = world.get_entity_mut(detached_series) {
+            detached_series_mut.remove::<ChildOf>();
         }
     }
 
@@ -386,7 +385,7 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
             .unused_targets
             .push(UnusedTargetDrop {
                 unused_target: target,
-                dropped_impulses,
+                dropped_series,
             });
     }
 }

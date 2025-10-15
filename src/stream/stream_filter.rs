@@ -32,7 +32,7 @@ use crate::{StreamAvailability, StreamPack};
 /// optional stream data.
 ///
 /// ```
-/// use bevy_impulse::{Require, prelude::*, testing::*};
+/// use crossflow::{Require, prelude::*, testing::*};
 ///
 /// fn service_discovery_system(
 ///     discover: ServiceDiscovery<

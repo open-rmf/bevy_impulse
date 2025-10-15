@@ -193,7 +193,7 @@ export interface DiagramEditorApi {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "fork_clone",
@@ -274,7 +274,7 @@ export interface NamespacedOperation {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "fork_clone",
@@ -402,11 +402,11 @@ export interface Diagram {
  *
  *  The output message will be sent to the operation specified by `next`.
  *
- *  TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
+ *  TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/crossflow/issues/43)
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "cutting_board",
@@ -475,7 +475,7 @@ export interface NodeSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "approach_door",
@@ -565,7 +565,7 @@ export interface ScopeSettings {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "plan",
@@ -616,11 +616,11 @@ export interface StreamOutSchema {
  *    finish "wins" the race and gets to the be output
  *  * join - connect each branch into a buffer and then use the `join`
  *    operation to reunite them
- *  * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)
+ *  * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/crossflow/issues/59)
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "begin_race",
@@ -673,7 +673,7 @@ export interface ForkCloneSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "name_phone_address",
@@ -743,7 +743,7 @@ export interface UnzipSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "fork_result",
@@ -811,7 +811,7 @@ export interface ForkResultSchema {
  *  remaining animals go to the zoo.
  *
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "select_animals",
@@ -872,7 +872,7 @@ export interface SplitSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "begin_measuring",
@@ -946,7 +946,7 @@ export interface SerializedJoinSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "transform",
@@ -968,7 +968,7 @@ export interface SerializedJoinSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "transform",
@@ -1004,7 +1004,7 @@ export interface TransformSchema {
  *
  *  # Examples
  *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
+ *  # crossflow::Diagram::from_json_str(r#"
  *  {
  *      "version": "0.1.0",
  *      "start": "num_output",

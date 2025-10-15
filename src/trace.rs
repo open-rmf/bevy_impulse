@@ -102,7 +102,7 @@ pub struct OperationStarted {
     /// The stack of session IDs that triggered the operation. The first entry
     /// is the root session. Each subsequent entry is a child session of the
     /// previous. There are two common ways to get a child session:
-    /// * In an impulse chain, earlier sessions in the chain are children of later
+    /// * In a series, earlier sessions in the chain are children of later
     ///   sessions in the chain, so the last session of the chain is the root of
     ///   the entire chain.
     /// * When a scope operation is triggered, a new session is created. Its parent

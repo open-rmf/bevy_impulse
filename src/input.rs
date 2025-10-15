@@ -223,8 +223,8 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
             let id = self.id();
             if let Some(detached) = self.get::<Detached>() {
                 if detached.is_detached() {
-                    // The input is going to a detached impulse that will not
-                    // react any further. We need to tell that detached impulse
+                    // The input is going to a detached series that will not
+                    // react any further. We need to tell that detached series
                     // to despawn since it is no longer needed.
                     roster.defer_despawn(id);
 
@@ -242,7 +242,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
 
             // However in this case, the target is not unused but also does not
             // have the correct input storage type. This indicates a bug in
-            // bevy_impulse itself, since the API should ensure that connection
+            // crossflow itself, since the API should ensure that connection
             // mismatches are impossible.
             self.world_mut()
                 .get_resource_or_insert_with(|| UnhandledErrors::default())

@@ -1,12 +1,12 @@
 [package]
 name = "calculator_ops_catalog"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "catalog of reusable calculator operations"
 
 [dependencies]
 bevy_app = { workspace = true }
-bevy_impulse = { version = "0.0.2", path = "../../..", features = ["diagram"] }
+crossflow = { version = "0.0.1", path = "../../..", features = ["diagram"] }
 bevy_time = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

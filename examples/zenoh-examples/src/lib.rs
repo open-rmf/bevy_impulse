@@ -17,7 +17,7 @@
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
-use bevy_impulse::prelude::*;
+use crossflow::prelude::*;
 use futures::future::Shared;
 use prost::Message;
 pub mod protos;
@@ -33,9 +33,9 @@ use zenoh_ext::{
 pub type ArcError = Arc<dyn Error + Send + Sync + 'static>;
 
 #[derive(Default)]
-pub struct ZenohImpulsePlugin {}
+pub struct ZenohCrossflowPlugin {}
 
-impl Plugin for ZenohImpulsePlugin {
+impl Plugin for ZenohCrossflowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ZenohSession>();
     }

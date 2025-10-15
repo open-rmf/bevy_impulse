@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   html: {
-    title: 'Bevy Impulse Diagram Editor',
+    title: 'Crossflow Diagram Editor',
     meta: {
       viewport: 'width=device-width, initial-scale=1.0',
     },

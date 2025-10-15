@@ -35,11 +35,11 @@ use super::{
 ///   finish "wins" the race and gets to the be output
 /// * join - connect each branch into a buffer and then use the `join`
 ///   operation to reunite them
-/// * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)
+/// * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/crossflow/issues/59)
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "begin_race",

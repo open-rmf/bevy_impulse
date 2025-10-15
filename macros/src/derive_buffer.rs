@@ -57,7 +57,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
     let impl_joined = impl_joined(&buffer_struct, &input_struct, &field_ident)?;
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::Joined for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::Joined for #struct_ident #ty_generics #where_clause {
             type Buffers = #buffer_struct_ident #ty_generics;
         }
 
@@ -122,7 +122,7 @@ pub(crate) fn impl_buffer_key_map(input_struct: &ItemStruct) -> Result<TokenStre
     let impl_accessed = impl_accessed(&buffer_struct, &input_struct, &field_ident, &field_type)?;
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::Accessor for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::Accessor for #struct_ident #ty_generics #where_clause {
             type Buffers = #buffer_struct_ident #ty_generics;
         }
 
@@ -169,7 +169,7 @@ struct StructConfig {
 impl StructConfig {
     fn from_data_struct(data_struct: &ItemStruct, attr_tag: &str) -> Self {
         let mut config = Self {
-            buffer_struct_name: format_ident!("__bevy_impulse_{}_Buffers", data_struct.ident),
+            buffer_struct_name: format_ident!("__crossflow_{}_Buffers", data_struct.ident),
         };
 
         let attr = data_struct
@@ -213,11 +213,11 @@ impl FieldSettings {
     }
 
     fn default_field_for_joined(ty: &Type) -> Type {
-        parse_quote! { ::bevy_impulse::FetchFromBuffer<#ty> }
+        parse_quote! { ::crossflow::FetchFromBuffer<#ty> }
     }
 
     fn default_field_for_key(ty: &Type) -> Type {
-        parse_quote! { <#ty as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer }
+        parse_quote! { <#ty as ::crossflow::BufferKeyLifecycle>::TargetBuffer }
     }
 }
 
@@ -337,11 +337,11 @@ fn impl_buffer_clone(
     if noncopy {
         // Clone impl for structs with a buffer that is not copyable
         quote! {
-            impl #impl_generics ::bevy_impulse::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
+            impl #impl_generics ::crossflow::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
                 fn clone(&self) -> Self {
                     Self {
                         #(
-                            #field_ident: ::bevy_impulse::re_exports::Clone::clone(&self.#field_ident),
+                            #field_ident: ::crossflow::re_exports::Clone::clone(&self.#field_ident),
                         )*
                     }
                 }
@@ -350,13 +350,13 @@ fn impl_buffer_clone(
     } else {
         // Clone and copy impl for structs with buffers that are all copyable
         quote! {
-            impl #impl_generics ::bevy_impulse::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
+            impl #impl_generics ::crossflow::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
                 fn clone(&self) -> Self {
                     *self
                 }
             }
 
-            impl #impl_generics ::bevy_impulse::re_exports::Copy for #buffer_struct_ident #ty_generics #where_clause {}
+            impl #impl_generics ::crossflow::re_exports::Copy for #buffer_struct_ident #ty_generics #where_clause {}
         }
     }
 }
@@ -376,9 +376,9 @@ fn impl_buffer_map_layout(
     let map_key: Vec<String> = field_ident.iter().map(|v| v.to_string()).collect();
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::BufferMapLayout for #struct_ident #ty_generics #where_clause {
-            fn try_from_buffer_map(buffers: &::bevy_impulse::BufferMap) -> Result<Self, ::bevy_impulse::IncompatibleLayout> {
-                let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
+        impl #impl_generics ::crossflow::BufferMapLayout for #struct_ident #ty_generics #where_clause {
+            fn try_from_buffer_map(buffers: &::crossflow::BufferMap) -> Result<Self, ::crossflow::IncompatibleLayout> {
+                let mut compatibility = ::crossflow::IncompatibleLayout::default();
                 #(
                     let #field_ident = compatibility.require_buffer_for_identifier::<#buffer>(#map_key, buffers);
                 )*
@@ -400,21 +400,21 @@ fn impl_buffer_map_layout(
             }
 
             fn get_buffer_message_type_hints(
-                identifiers: ::std::collections::HashSet<::bevy_impulse::BufferIdentifier<'static>>,
-            ) -> ::std::result::Result<::bevy_impulse::MessageTypeHintMap, ::bevy_impulse::IncompatibleLayout> {
-                let mut evaluation = ::bevy_impulse::MessageTypeHintEvaluation::new(identifiers);
+                identifiers: ::std::collections::HashSet<::crossflow::BufferIdentifier<'static>>,
+            ) -> ::std::result::Result<::crossflow::MessageTypeHintMap, ::crossflow::IncompatibleLayout> {
+                let mut evaluation = ::crossflow::MessageTypeHintEvaluation::new(identifiers);
                 #(
-                    evaluation.set_hint(#map_key, <#buffer as ::bevy_impulse::AsAnyBuffer>::message_type_hint());
+                    evaluation.set_hint(#map_key, <#buffer as ::crossflow::AsAnyBuffer>::message_type_hint());
                 )*
 
                 evaluation.evaluate()
             }
         }
 
-        impl #impl_generics ::bevy_impulse::BufferMapStruct for #struct_ident #ty_generics #where_clause {
-            fn buffer_list(&self) -> ::bevy_impulse::re_exports::SmallVec<[::bevy_impulse::AnyBuffer; 8]> {
-                ::bevy_impulse::re_exports::smallvec![#(
-                    ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.#field_ident),
+        impl #impl_generics ::crossflow::BufferMapStruct for #struct_ident #ty_generics #where_clause {
+            fn buffer_list(&self) -> ::crossflow::re_exports::SmallVec<[::crossflow::AnyBuffer; 8]> {
+                ::crossflow::re_exports::smallvec![#(
+                    ::crossflow::AsAnyBuffer::as_any_buffer(&self.#field_ident),
                 )*]
             }
         }
@@ -435,14 +435,14 @@ fn impl_joined(
     let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::Joining for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::Joining for #struct_ident #ty_generics #where_clause {
             type Item = #item_struct_ident #ty_generics;
 
             fn fetch_for_join(
                 &self,
-                session: ::bevy_impulse::re_exports::Entity,
-                world: &mut ::bevy_impulse::re_exports::World,
-            ) -> ::std::result::Result<Self::Item, ::bevy_impulse::OperationError> {
+                session: ::crossflow::re_exports::Entity,
+                world: &mut ::crossflow::re_exports::World,
+            ) -> ::std::result::Result<Self::Item, ::crossflow::OperationError> {
                 #(
                     let #field_ident = self.#field_ident.fetch_for_join(session, world)?;
                 )*
@@ -467,40 +467,40 @@ fn impl_accessed(
     let (impl_generics, ty_generics, where_clause) = key_struct.generics.split_for_impl();
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::Accessing for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::Accessing for #struct_ident #ty_generics #where_clause {
             type Key = #key_struct_ident #ty_generics;
 
             fn add_accessor(
                 &self,
-                accessor: ::bevy_impulse::re_exports::Entity,
-                world: &mut ::bevy_impulse::re_exports::World,
-            ) -> ::bevy_impulse::OperationResult {
+                accessor: ::crossflow::re_exports::Entity,
+                world: &mut ::crossflow::re_exports::World,
+            ) -> ::crossflow::OperationResult {
                 #(
-                    ::bevy_impulse::Accessing::add_accessor(&self.#field_ident, accessor, world)?;
+                    ::crossflow::Accessing::add_accessor(&self.#field_ident, accessor, world)?;
                 )*
                 Ok(())
             }
 
-            fn create_key(&self, builder: &::bevy_impulse::BufferKeyBuilder) -> Self::Key {
+            fn create_key(&self, builder: &::crossflow::BufferKeyBuilder) -> Self::Key {
                 Self::Key {#(
                     // TODO(@mxgrey): This currently does not have good support for the user
                     // substituting in a different key type than what the BufferKeyLifecycle expects.
                     // We could consider adding a .clone().into() to help support that use case, but
                     // this would be such a niche use case that I think we can ignore it for now.
-                    #field_ident: <#field_type as ::bevy_impulse::BufferKeyLifecycle>::create_key(&self.#field_ident, builder),
+                    #field_ident: <#field_type as ::crossflow::BufferKeyLifecycle>::create_key(&self.#field_ident, builder),
                 )*}
             }
 
             fn deep_clone_key(key: &Self::Key) -> Self::Key {
                 Self::Key {#(
-                    #field_ident: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.#field_ident),
+                    #field_ident: ::crossflow::BufferKeyLifecycle::deep_clone(&key.#field_ident),
                 )*}
             }
 
             fn is_key_in_use(key: &Self::Key) -> bool {
                 false
                     #(
-                        || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.#field_ident)
+                        || ::crossflow::BufferKeyLifecycle::is_in_use(&key.#field_ident)
                     )*
             }
         }

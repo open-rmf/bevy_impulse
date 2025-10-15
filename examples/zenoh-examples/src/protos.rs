@@ -15,4 +15,4 @@
  *
 */
 
-include!(concat!(env!("OUT_DIR"), "/impulse.zenoh_examples.rs"));
+include!(concat!(env!("OUT_DIR"), "/crossflow.zenoh_examples.rs"));

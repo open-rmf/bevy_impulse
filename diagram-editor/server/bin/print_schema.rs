@@ -1,4 +1,4 @@
-use bevy_impulse_diagram_editor::api::{
+use crossflow_diagram_editor::api::{
     executor::{DebugSessionMessage, PostRunRequest},
     RegistryResponse,
 };

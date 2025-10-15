@@ -1,31 +1,31 @@
-# bevy_impulse_diagram_editor
+# crossflow_diagram_editor
 
 ![](./docs/assets/diagram-editor-preview.webp)
 
-This contains a SPA React web app to create and edit a `bevy_impulse` diagram and an axum router to serve it.
+This contains a SPA React web app to create and edit a `crossflow` diagram and an axum router to serve it.
 
-## Embedding the Diagram Editor into a `bevy_impulse` app
+## Embedding the Diagram Editor into a `crossflow` app
 
-`bevy_impulse_diagram_editor` contains an embedded version of the frontend. An `axum` router is provided
+`crossflow_diagram_editor` contains an embedded version of the frontend. An `axum` router is provided
 that can be used to serve the embedded frontend.
 
 ```bash
-cargo add bevy_impulse_diagram_editor axum tokio
+cargo add crossflow_diagram_editor axum tokio
 ```
 
 > [!IMPORTANT]
-> `bevy_impulse_diagram_editor` is not released yet, for now, use `cargo add --git https://github.com/open-rmf/bevy_impulse bevy_impulse_diagram_editor`.
+> `crossflow_diagram_editor` is not released yet, for now, use `cargo add --git https://github.com/open-rmf/crossflow crossflow_diagram_editor`.
 
 
 ```rust
-use bevy_impulse_diagram_editor::{new_router, ServerOptions};
+use crossflow_diagram_editor::{new_router, ServerOptions};
 
 fn main() {
   let mut registry = DiagramElementRegistry::new();
   // register node builders, section builders etc.
 
   let mut app = bevy_app::App::new();
-  app.add_plugins(ImpulseAppPlugin::default());
+  app.add_plugins(CrossflowExecutorApp::default());
   let router = new_router(&mut app, registry, ServerOptions::default());
   let listener = tokio::net::TcpListener::bind(("localhost", 3000))
       .await
@@ -40,7 +40,7 @@ The embedded frontend can be disabled:
 
 ```toml
 [dependencies]
-bevy_impulse_diagram_editor = { version = "0.0.1", default-features = false, features = ["router"] }
+crossflow_diagram_editor = { version = "0.0.1", default-features = false, features = ["router"] }
 ```
 
 This will cause the router to serve only the rest API.
@@ -51,7 +51,7 @@ See the [calculator demo](../examples/diagram/calculator) for more examples.
 
 If the bevy app can be compiled into a WebAssembly blob, the diagram editor can use it in place of an API server.
 
-See [bevy_impulse_diagram_editor_wasm](./wasm/README.md) for more info.
+See [crossflow_diagram_editor_wasm](./wasm/README.md) for more info.
 
 ## Local development server
 
@@ -89,7 +89,7 @@ then in another terminal, start the frontend `dev` server:
 pnpm dev
 ```
 
-When there are breaking changes in `bevy_impulse`, the typescript definitions need to be regenerated:
+When there are breaking changes in `crossflow`, the typescript definitions need to be regenerated:
 
 ```bash
 pnpm generate-types
@@ -97,7 +97,7 @@ pnpm generate-types
 
 ### Live Demo
 
-We host a live demo of the diagram editor at [this link](https://open-rmf.github.io/bevy_impulse/). The diagram editor and workflow executor both run in the client's web browser. The node catalog includes simple math operations.
+We host a live demo of the diagram editor at [this link](https://open-rmf.github.io/crossflow/). The diagram editor and workflow executor both run in the client's web browser. The node catalog includes simple math operations.
 
 > [!NOTE]
 > Repo maintainers that want to update the web-hosted demo should run these commands:

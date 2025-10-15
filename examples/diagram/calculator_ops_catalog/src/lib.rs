@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use bevy_impulse::{
+use crossflow::{
     AsyncMap, ConfigExample, DiagramElementRegistry, JsonMessage, NodeBuilderOptions, StreamPack,
 };
 use schemars::JsonSchema;
@@ -473,14 +473,14 @@ pub fn register(registry: &mut DiagramElementRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_impulse::prelude::*;
+    use crossflow::prelude::*;
     use serde_json::json;
 
     #[test]
     fn test_split() {
         let diagram = Diagram::from_json(json!(
             {
-                "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+                "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
                 "version": "0.1.0",
                 "templates": {},
                 "start": "62746cc5-19e4-456f-a94f-d49619ccd2c0",
@@ -533,7 +533,7 @@ mod tests {
         let request = json!([1, 2]);
 
         let mut app = bevy_app::App::new();
-        app.add_plugins(ImpulseAppPlugin::default());
+        app.add_plugins(CrossflowExecutorApp::default());
         let mut registry = DiagramElementRegistry::new();
         register(&mut registry);
 
