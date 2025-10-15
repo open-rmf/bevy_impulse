@@ -1,7 +1,7 @@
 use std::{future::Future, task::Poll};
 
 use axum::{extract::State, Json};
-use bevy_impulse_diagram_editor::api::{self, executor::PostRunRequest};
+use crossflow_diagram_editor::api::{self, executor::PostRunRequest};
 use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
@@ -62,7 +62,7 @@ pub async fn post_run(request: PostRunRequestWasm) -> Result<JsValue, JsValue> {
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use bevy_impulse::{Diagram, DiagramOperation, NextOperation, NodeSchema, TraceSettings};
+    use crossflow::{Diagram, DiagramOperation, NextOperation, NodeSchema, TraceSettings};
     use wasm_bindgen_test::*;
 
     use super::*;
@@ -78,7 +78,7 @@ mod tests {
             builder: "add3".into(),
             config: serde_json::Value::Null.into(),
             next: NextOperation::Builtin {
-                builtin: bevy_impulse::BuiltinTarget::Terminate,
+                builtin: crossflow::BuiltinTarget::Terminate,
             },
             stream_out: HashMap::new(),
             trace_settings: TraceSettings::default(),

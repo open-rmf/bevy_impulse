@@ -176,7 +176,7 @@ pub enum CancellationCause {
     /// component. This type of cancellation indicates that you are modifying
     /// the entities in a workflow in an unsupported way. If you believe that
     /// you are not doing anything unsupported then this could indicate a bug in
-    /// `bevy_impulse` itself, and you encouraged to open an issue with a minimal
+    /// `crossflow` itself, and you encouraged to open an issue with a minimal
     /// reproducible example.
     ///
     /// The entity provided in [`Broken`] is the link where the breakage was

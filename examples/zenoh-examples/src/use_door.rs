@@ -17,9 +17,9 @@
 
 use bevy_app::{App, AppExit, Update};
 use bevy_ecs::prelude::{EventWriter, Res};
-use bevy_impulse::prelude::*;
 use bevy_time::{Time, TimePlugin};
 use clap::Parser;
+use crossflow::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,7 +27,7 @@ use tracing::error;
 use uuid::Uuid;
 use zenoh_examples::protos;
 
-use zenoh_examples::{zenoh_publisher_node, zenoh_subscription_node, ZenohImpulsePlugin};
+use zenoh_examples::{zenoh_publisher_node, zenoh_subscription_node, ZenohCrossflowPlugin};
 
 #[derive(Parser)]
 struct Args {
@@ -42,8 +42,8 @@ fn main() {
     let args = Args::parse();
     let mut app = App::new();
     app.add_plugins((
-        ImpulseAppPlugin::default(),
-        ZenohImpulsePlugin::default(),
+        CrossflowExecutorApp::default(),
+        ZenohCrossflowPlugin::default(),
         TimePlugin::default(),
     ));
 

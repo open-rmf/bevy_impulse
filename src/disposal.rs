@@ -33,8 +33,8 @@ use smallvec::SmallVec;
 use thiserror::Error as ThisError;
 
 use crate::{
-    operation::ScopeStorage, Cancel, Cancellation, DisposalFailure, ImpulseMarker, OperationResult,
-    OperationRoster, OrBroken, UnhandledErrors, UnusedTarget,
+    operation::ScopeStorage, Cancel, Cancellation, DisposalFailure, OperationResult,
+    OperationRoster, OrBroken, SeriesMarker, UnhandledErrors, UnusedTarget,
 };
 
 #[derive(ThisError, Debug, Clone)]
@@ -492,8 +492,8 @@ pub trait InspectDisposals {
 impl<'w> ManageDisposal for EntityWorldMut<'w> {
     fn emit_disposal(&mut self, session: Entity, disposal: Disposal, roster: &mut OperationRoster) {
         let Some(scope) = self.get::<ScopeStorage>() else {
-            if self.contains::<ImpulseMarker>() {
-                // If an impulse has been supplanted, we trigger a cancellation
+            if self.contains::<SeriesMarker>() {
+                // If a series has been supplanted, we trigger a cancellation
                 // for it. Besides supplanting, we do not generally convert a
                 // disposal into a cancellation because sometimes services will
                 // emit disposals just to trigger a reachability check, e.g. for
@@ -509,11 +509,10 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 }
                 // TODO(@mxgrey): Consider whether there is a more sound way to
                 // decide whether a disposal should be converted into a
-                // cancellation for impulses.
+                // cancellation for a series.
             } else if !self.contains::<UnusedTarget>() {
                 // If the emitting node does not have a scope, is not part of
-                // an impulse chain, and is not an unused target, then something
-                // is broken.
+                // a series, and is not an unused target, then something is broken.
                 //
                 // We can safely ignore disposals for unused targets because
                 // unused targets cannot affect the reachability of a workflow.

@@ -323,7 +323,7 @@ export function validateEdgeSimple(
 /**
  * Perform a full check of the validity of edges.
  * Includes the checks in `validateEdgesSimple` and the following:
- *   * TODO: Export and send the diagram to `bevy_impulse` for complete validation.
+ *   * TODO: Export and send the diagram to `crossflow` for complete validation.
  *
  * This can be slow so it is not recommended to call this frequently.
  */
@@ -337,8 +337,8 @@ export async function validateEdgeFull(
     return simpleCheck;
   }
 
-  // TODO: Writing the same logic as `bevy_impulse` to do complete validation is hard, it is
-  // be better to introduce a validation endpoint and have `bevy_impulse` do the validation.
+  // TODO: Writing the same logic as `crossflow` to do complete validation is hard, it is
+  // be better to introduce a validation endpoint and have `crossflow` do the validation.
 
   return { valid: true, validEdgeTypes: simpleCheck.validEdgeTypes };
 }

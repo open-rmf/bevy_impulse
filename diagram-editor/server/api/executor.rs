@@ -12,7 +12,7 @@ use axum::{
 #[cfg(feature = "router")]
 use axum::{routing::post, Router};
 use bevy_ecs::{prelude::Entity, schedule::IntoScheduleConfigs};
-use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
+use crossflow::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -306,9 +306,9 @@ fn execute_requests(
             let registry = &*ctx.registry.lock().unwrap();
             let maybe_promise = match ctx.diagram.spawn_io_workflow(&mut cmds, registry) {
                 Ok(workflow) => {
-                    let impulse = cmds.request(ctx.request, workflow);
-                    let session = impulse.session_id();
-                    let promise: Promise<serde_json::Value> = impulse.take_response();
+                    let series = cmds.request(ctx.request, workflow);
+                    let session = series.session_id();
+                    let promise: Promise<serde_json::Value> = series.take_response();
                     if let Some(feedback_tx) = ctx.feedback_tx {
                         cmds.entity(session).insert(feedback_tx);
                     }
@@ -479,7 +479,7 @@ mod tests {
         body,
         http::{header, Request},
     };
-    use bevy_impulse::{ImpulseAppPlugin, NodeBuilderOptions};
+    use crossflow::{CrossflowExecutorApp, NodeBuilderOptions};
     #[cfg(feature = "debug")]
     use futures_util::SinkExt;
     use mime_guess::mime;
@@ -507,7 +507,7 @@ mod tests {
             // We need to instantiate the App inside the thread that it will run
             // inside because App is no longer Send as of Bevy 0.14.
             let mut app = bevy_app::App::new();
-            app.add_plugins(ImpulseAppPlugin::default());
+            app.add_plugins(CrossflowExecutorApp::default());
             app.add_systems(
                 bevy_app::Update,
                 move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
@@ -601,7 +601,7 @@ mod tests {
     #[cfg(feature = "debug")]
     fn setup_ws_test() -> WsTestFixture<impl FnOnce()> {
         let mut app = bevy_app::App::new();
-        app.add_plugins(ImpulseAppPlugin::default());
+        app.add_plugins(CrossflowExecutorApp::default());
         let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel::<()>();
         app.add_systems(
             bevy_app::Update,
@@ -632,7 +632,7 @@ mod tests {
     }
 
     #[cfg(feature = "debug")]
-    #[ignore = "tracing events in `bevy_impulse` is delayed"]
+    #[ignore = "tracing events in `crossflow` is delayed"]
     #[tokio::test]
     #[test_log::test]
     async fn test_ws_debug() {
@@ -644,7 +644,7 @@ mod tests {
         } = setup_ws_test();
 
         let mut diagram = new_add7_diagram();
-        diagram.default_trace = bevy_impulse::TraceToggle::On;
+        diagram.default_trace = crossflow::TraceToggle::On;
 
         let request_body = PostRunRequest {
             diagram,

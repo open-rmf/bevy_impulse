@@ -1,11 +1,11 @@
 [package]
 name = "calculator"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../../diagram-editor", features = ["basic_executor"] }
-calculator_ops_catalog = { version = "0.1.0", path = "../calculator_ops_catalog" }
+crossflow_diagram_editor = { path = "../../../diagram-editor", features = ["basic_executor"] }
+calculator_ops_catalog = { path = "../calculator_ops_catalog" }
 
 [dev-dependencies]
 assert_cmd = "2.0.16"

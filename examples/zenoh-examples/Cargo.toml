@@ -1,6 +1,6 @@
 [package]
 name = "zenoh-examples"
-version = "0.0.2"
+version = "0.0.1"
 edition = "2021"
 
 [[bin]]
@@ -12,7 +12,7 @@ name = "use-door"
 path = "src/use_door.rs"
 
 [dependencies]
-bevy_impulse = { version = "0.0.2", path = "../..", features = ["diagram"] }
+crossflow = { version = "0.0.1", path = "../..", features = ["diagram"] }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_time = { workspace = true }

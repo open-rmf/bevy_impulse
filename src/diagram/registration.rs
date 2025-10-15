@@ -1426,7 +1426,7 @@ impl DiagramElementRegistry {
     /// [`Self::register_node_builder_fallible`] instead.
     ///
     /// ```
-    /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
+    /// use crossflow::{NodeBuilderOptions, DiagramElementRegistry};
     ///
     /// let mut registry = DiagramElementRegistry::new();
     /// registry.register_node_builder(
@@ -1537,7 +1537,7 @@ impl DiagramElementRegistry {
     /// operation(s):
     ///
     /// ```
-    /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
+    /// use crossflow::{NodeBuilderOptions, DiagramElementRegistry};
     ///
     /// struct NonSerializable {
     ///     data: String
@@ -1596,7 +1596,7 @@ impl DiagramElementRegistry {
         self.messages.get::<T>()
     }
 
-    /// Register useful messages that are known to the bevy impulse library.
+    /// Register useful messages that are known to the crossflow library.
     /// This will be run automatically when you create using [`Self::default()`]
     /// or [`Self::new()`].
     pub fn register_builtin_messages(&mut self) {

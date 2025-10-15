@@ -22,7 +22,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     dyn_node::{DynStreamInputPack, DynStreamOutputPack},
-    send_named_stream, AddImpulse, AddOperation, Builder, DefaultStreamBufferContainer,
+    send_named_stream, AddExecution, AddOperation, Builder, DefaultStreamBufferContainer,
     InnerChannel, InputSlot, NamedStreamRedirect, NamedStreamTargets, NamedTarget, NamedValue,
     OperationResult, OperationRoster, OrBroken, Output, Push, Receiver, RedirectScopeStream,
     RedirectWorkflowStream, ReportUnhandled, SendNamedStreams, SingleInputStorage,
@@ -107,13 +107,13 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         let (sender, receiver) = unbounded_channel::<NamedValue<S::Output>>();
         let target = commands
             .spawn(())
-            // Set the parent of this stream to be the impulse so it can be
+            // Set the parent of this stream to be the series so it can be
             // recursively despawned together.
             .insert(ChildOf(source))
             .id();
 
         map.add_anonymous::<NamedValue<S::Output>>(target, commands);
-        commands.queue(AddImpulse::new(None, target, TakenStream::new(sender)));
+        commands.queue(AddExecution::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -125,7 +125,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         commands: &mut Commands,
     ) {
         let redirect = commands.spawn(()).insert(ChildOf(source)).id();
-        commands.queue(AddImpulse::new(
+        commands.queue(AddExecution::new(
             None,
             redirect,
             Push::<NamedValue<S::Output>>::new(target, true),

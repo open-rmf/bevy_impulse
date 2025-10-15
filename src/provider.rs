@@ -33,8 +33,7 @@ use bevy_ecs::prelude::{Commands, Entity};
 ///   - Any single-input function, regular or async, can be used as a map
 ///   - Cannot view or modify the world (except by using the [async channel][3]) but has less overhead than `Services` or `Callbacks`
 ///
-/// Types that implement this trait can be used to create nodes in a workflow or
-/// impulses in an impulse chain.
+/// Types that implement this trait can be used to create nodes in a workflow or series.
 ///
 /// Across these three types of providers there are three flavors to choose from:
 ///
@@ -53,7 +52,7 @@ pub trait Provider: ProvideOnce {}
 
 /// Similar to [`Provider`] but can be used for functions that are only able to
 /// run once, e.g. that use [`FnOnce`]. Because of this, [`ProvideOnce`] is
-/// suitable for impulses, but not for workflows.
+/// suitable for a series, but not for workflows.
 pub trait ProvideOnce {
     type Request;
     type Response;

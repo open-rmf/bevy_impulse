@@ -1,6 +1,6 @@
 # Calculator example
 
-This is an example that shows how to build a `bevy_impulse` workflow from a diagram
+This is an example that shows how to build a `crossflow` workflow from a diagram
 that expresses some calculator operations. This is not a practical use case of
 workflows; it is only meant to be illustrative of how to use the tools.
 

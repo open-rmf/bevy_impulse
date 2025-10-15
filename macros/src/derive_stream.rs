@@ -24,11 +24,11 @@ pub(crate) fn impl_derive_stream(stream_struct: &ItemStruct) -> Result<TokenStre
     let (impl_generics, ty_generics, where_clause) = &stream_struct.generics.split_for_impl();
 
     let from_anonymous_stream_pack = quote! {
-        <::bevy_impulse::AnonymousStream<Self> as ::bevy_impulse::StreamPack>
+        <::crossflow::AnonymousStream<Self> as ::crossflow::StreamPack>
     };
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::StreamPack for #stream_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::StreamPack for #stream_ident #ty_generics #where_clause {
             type StreamInputPack = #from_anonymous_stream_pack::StreamInputPack;
             type StreamOutputPack = #from_anonymous_stream_pack::StreamOutputPack;
             type StreamReceivers = #from_anonymous_stream_pack::StreamReceivers;
@@ -37,63 +37,63 @@ pub(crate) fn impl_derive_stream(stream_struct: &ItemStruct) -> Result<TokenStre
 
 
             fn spawn_scope_streams(
-                in_scope: ::bevy_impulse::re_exports::Entity,
-                out_scope: ::bevy_impulse::re_exports::Entity,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                in_scope: ::crossflow::re_exports::Entity,
+                out_scope: ::crossflow::re_exports::Entity,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
                 #from_anonymous_stream_pack::spawn_scope_streams(in_scope, out_scope, commands)
             }
 
-            fn spawn_workflow_streams(builder: &mut ::bevy_impulse::Builder) -> Self::StreamInputPack {
+            fn spawn_workflow_streams(builder: &mut ::crossflow::Builder) -> Self::StreamInputPack {
                 #from_anonymous_stream_pack::spawn_workflow_streams(builder)
             }
 
             fn spawn_node_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                builder: &mut ::bevy_impulse::Builder,
+                source: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                builder: &mut ::crossflow::Builder,
             ) -> Self::StreamOutputPack {
                 #from_anonymous_stream_pack::spawn_node_streams(source, map, builder)
             }
 
             fn take_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) -> Self::StreamReceivers {
                 #from_anonymous_stream_pack::take_streams(source, map, commands)
             }
 
             fn collect_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                target: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                target: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) {
                 #from_anonymous_stream_pack::collect_streams(source, target, map, commands)
             }
 
             fn make_stream_channels(
-                inner: &::std::sync::Arc<::bevy_impulse::InnerChannel>,
-                world: &::bevy_impulse::re_exports::World,
+                inner: &::std::sync::Arc<::crossflow::InnerChannel>,
+                world: &::crossflow::re_exports::World,
             ) -> Self::StreamChannels {
                 #from_anonymous_stream_pack::make_stream_channels(inner, world)
             }
 
             fn make_stream_buffers(
-                target_map: Option<&::bevy_impulse::StreamTargetMap>,
+                target_map: Option<&::crossflow::StreamTargetMap>,
             ) -> Self::StreamBuffers {
                 #from_anonymous_stream_pack::make_stream_buffers(target_map)
             }
 
             fn process_stream_buffers(
                 buffer: Self::StreamBuffers,
-                source: ::bevy_impulse::re_exports::Entity,
-                session: ::bevy_impulse::re_exports::Entity,
-                unused: &mut ::bevy_impulse::UnusedStreams,
-                world: &mut ::bevy_impulse::re_exports::World,
-                roster: &mut ::bevy_impulse::OperationRoster,
-            ) -> ::bevy_impulse::OperationResult {
+                source: ::crossflow::re_exports::Entity,
+                session: ::crossflow::re_exports::Entity,
+                unused: &mut ::crossflow::UnusedStreams,
+                world: &mut ::crossflow::re_exports::World,
+                roster: &mut ::crossflow::OperationRoster,
+            ) -> ::crossflow::OperationResult {
                 #from_anonymous_stream_pack::process_stream_buffers(
                     buffer, source, session, unused, world, roster
                 )
@@ -101,30 +101,30 @@ pub(crate) fn impl_derive_stream(stream_struct: &ItemStruct) -> Result<TokenStre
 
             fn defer_buffers(
                 buffer: Self::StreamBuffers,
-                source: ::bevy_impulse::re_exports::Entity,
-                session: ::bevy_impulse::re_exports::Entity,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                session: ::crossflow::re_exports::Entity,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) {
                 #from_anonymous_stream_pack::defer_buffers(buffer, source, session, commands)
             }
 
-            fn set_stream_availability(availability: &mut ::bevy_impulse::StreamAvailability) {
+            fn set_stream_availability(availability: &mut ::crossflow::StreamAvailability) {
                 #from_anonymous_stream_pack::set_stream_availability(availability)
             }
 
-            fn are_streams_available(availability: &::bevy_impulse::StreamAvailability) -> bool {
+            fn are_streams_available(availability: &::crossflow::StreamAvailability) -> bool {
                 #from_anonymous_stream_pack::are_streams_available(availability)
             }
 
             fn into_dyn_stream_input_pack(
-                pack: &mut ::bevy_impulse::dyn_node::DynStreamInputPack,
+                pack: &mut ::crossflow::dyn_node::DynStreamInputPack,
                 input: Self::StreamInputPack,
             ) {
                 #from_anonymous_stream_pack::into_dyn_stream_input_pack(pack, input)
             }
 
             fn into_dyn_stream_output_pack(
-                pack: &mut ::bevy_impulse::dyn_node::DynStreamOutputPack,
+                pack: &mut ::crossflow::dyn_node::DynStreamOutputPack,
                 outputs: Self::StreamOutputPack,
             ) {
                 #from_anonymous_stream_pack::into_dyn_stream_output_pack(pack, outputs)

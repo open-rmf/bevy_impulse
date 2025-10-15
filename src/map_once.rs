@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    AddImpulse, AsyncMap, AsyncMapMarker, BlockingMap, BlockingMapMarker, ImpulseAsyncMap,
-    ImpulseBlockingMap, ProvideOnce, Sendish, StreamPack,
+    AddExecution, AsyncMap, AsyncMapMarker, AsyncMapOnce, BlockingMap, BlockingMapMarker,
+    BlockingMapOnce, ProvideOnce, Sendish, StreamPack,
 };
 
 use bevy_ecs::prelude::{Commands, Entity};
@@ -74,10 +74,10 @@ where
     type Streams = ();
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.queue(AddImpulse::new(
+        commands.queue(AddExecution::new(
             None,
             source,
-            ImpulseBlockingMap::new(target, self.def),
+            BlockingMapOnce::new(target, self.def),
         ));
     }
 }
@@ -184,10 +184,10 @@ where
     type Streams = Streams;
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.queue(AddImpulse::new(
+        commands.queue(AddExecution::new(
             None,
             source,
-            ImpulseAsyncMap::new(target, self.def),
+            AsyncMapOnce::new(target, self.def),
         ));
     }
 }

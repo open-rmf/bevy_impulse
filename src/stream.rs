@@ -50,7 +50,7 @@ pub use stream_target_map::*;
 
 // TODO(@mxgrey): Add module-level documentation for stream.rs
 
-pub use bevy_impulse_derive::{Stream, StreamPack};
+pub use crossflow_derive::{Stream, StreamPack};
 /// You can create custom stream types that have side-effects, such as:
 /// - applying a transformation to the stream input to produce a different type of output
 /// - logging the message data

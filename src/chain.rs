@@ -403,7 +403,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// When the response is delivered, we will make clones of it and
-    /// simultaneously pass that clone along mutliple impulse chains, each one
+    /// simultaneously pass that clone along mutliple branches, each one
     /// determined by a different element of the tuple that gets passed in as
     /// a builder.
     ///
@@ -799,7 +799,7 @@ where
     /// that trait, then you can use [`Self::cancel_on_quiet_err`] instead.
     ///
     /// ```
-    /// use bevy_impulse::{prelude::*, testing::*};
+    /// use crossflow::{prelude::*, testing::*};
     ///
     /// let mut context = TestingContext::minimal_plugins();
     ///

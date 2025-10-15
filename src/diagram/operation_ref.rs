@@ -114,7 +114,7 @@ pub struct NamedOperationRef {
     /// there are two values of `NamedOperationRef` to consider:
     ///
     /// ```
-    /// # use bevy_impulse::diagram::{NamedOperationRef, NamespaceList};
+    /// # use crossflow::diagram::{NamedOperationRef, NamespaceList};
     /// # use smallvec::smallvec;
     ///
     /// let op_id = NamedOperationRef {
@@ -129,7 +129,7 @@ pub struct NamedOperationRef {
     /// siblings of `sec` would instead connect to
     ///
     /// ```
-    /// # use bevy_impulse::diagram::NamedOperationRef;
+    /// # use crossflow::diagram::NamedOperationRef;
     /// # use smallvec::smallvec;
     ///
     /// let op_id = NamedOperationRef {

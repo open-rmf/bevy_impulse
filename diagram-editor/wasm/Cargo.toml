@@ -1,12 +1,12 @@
 [package]
-name = "bevy_impulse_diagram_editor_wasm"
+name = "crossflow_diagram_editor_wasm"
 version = "0.0.1"
 edition = "2021"
 authors = ["Teo Koon Peng <koonpeng@intrinsic.ai>"]
 license = "Apache-2.0"
-description = "Webassembly backend for bevy_impulse diagram editor"
+description = "Webassembly backend for crossflow diagram editor"
 readme = "README.md"
-repository = "https://github.com/open-rmf/bevy_impulse"
+repository = "https://github.com/open-rmf/crossflow"
 keywords = [
   "reactive",
   "workflow",
@@ -27,11 +27,11 @@ categories = [
 [dependencies]
 axum = { workspace = true, features = ["json"], default-features = false }
 bevy_app = { workspace = true }
-bevy_impulse = { version = "0.0.2", path = "../..", features = [
+crossflow = { version = "0.0.1", path = "../..", features = [
   "diagram",
   "single_threaded_async",
 ] }
-bevy_impulse_diagram_editor = { version = "0.0.1", path = "..", default-features = false }
+crossflow_diagram_editor = { version = "0.0.1", path = "..", default-features = false }
 mime_guess = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6.5"

@@ -49,7 +49,7 @@ use std::{
 /// object by applying `.as_callback()`.
 ///
 /// ```rust
-/// use bevy_impulse::{prelude::*, testing::Integer};
+/// use crossflow::{prelude::*, testing::Integer};
 /// use bevy_ecs::prelude::*;
 ///
 /// fn add_integer(
@@ -63,7 +63,7 @@ use std::{
 /// ```
 ///
 /// ```rust
-/// use bevy_impulse::{prelude::*, testing::Integer};
+/// use crossflow::{prelude::*, testing::Integer};
 /// use bevy_ecs::prelude::*;
 /// use std::future::Future;
 ///
@@ -91,7 +91,7 @@ use std::{
 /// running until it is finished.
 ///
 /// ```rust
-/// use bevy_impulse::{prelude::*, testing::Integer};
+/// use crossflow::{prelude::*, testing::Integer};
 /// use bevy_ecs::prelude::*;
 ///
 /// fn add_integer(
@@ -114,7 +114,7 @@ use std::{
 /// you activate the `single_threaded_async` feature).
 ///
 /// ```rust
-/// use bevy_impulse::{prelude::*, testing::Integer};
+/// use crossflow::{prelude::*, testing::Integer};
 /// use bevy_ecs::prelude::*;
 /// use std::future::Future;
 ///

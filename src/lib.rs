@@ -15,17 +15,22 @@
  *
 */
 
-//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/bevy_impulse/main/assets/figures/sense-think-act_workflow.svg)
+//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/crossflow/main/assets/figures/sense-think-act_workflow.svg)
 //!
-//! Bevy impulse is an extension to the [Bevy](https://bevyengine.org) game
-//! engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
+//! Crossflow is a workflow execution library built on the [Bevy](https://bevyengine.org)
+//! game engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
 //! into services and workflows that can be used for reactive service-oriented
 //! programming.
+//!
+//! Crossflow can be used to make general-purpose async programming easier (especially
+//! inside of bevy applications) using the native Rust API, or it can be used for
+//! visual graph-based programming by defining workflows with JSON (using an editor
+//! or generating with a planner) and then loading and executing those workflows at runtime.
 //!
 //! ## Services
 //!
 //! One primitive element of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
-//! In bevy impulse, a [`Service`] is a bevy system that is associated with an
+//! In crossflow, a [`Service`] is a bevy system that is associated with an
 //! entity and can be created using [`Commands::spawn_service`](SpawnServicesExt::spawn_service)
 //! or [`App::add_service`](AddServicesExt::add_service).
 //!
@@ -34,7 +39,7 @@
 //! object, you can find previously spawned services later using the [`ServiceDiscovery`]
 //! system parameter.
 //!
-//! Sometimes [`Service`] is not quite the right fit for your use case, so bevy impulse
+//! Sometimes [`Service`] is not quite the right fit for your use case, so crossflow
 //! offers a generalization of services callled [`Provider`] which has some
 //! more options for defining a reactive element.
 //!
@@ -53,17 +58,16 @@
 //! When you spawn your workflow, you will receive a [`Service`] object that
 //! lets you use the workflow as if it's an ordinary service.
 //!
-//! ## Impulses
+//! ## Series
 //!
 //! Services and workflows are reusable building blocks for creating a reactive
 //! application. In order to actually run them, call [`Commands::request`](RequestExt::request)
-//! which will provide you with an [`Impulse`]. An impulse is a one-time-use
+//! which will provide you with a [`Series`]. A series is a one-time-use
 //! reaction to a request which you can chain to subsequent reactions using
-//! [`Impulse::then`]. Any impulse chain that you create will only run exactly
-//! once.
+//! [`Series::then`]. Any series that you create will only run exactly once.
 //!
-//! Once you've finished building your chain, use [`Impulse::detach`] to let it
-//! run freely, or use [`Impulse::take`] to get a [`Recipient`] of the final
+//! Once you've finished building your series, use [`Series::detach`] to let it
+//! run freely, or use [`Series::take`] to get a [`Recipient`] of the final
 //! result.
 
 mod async_execution;
@@ -106,8 +110,8 @@ pub use flush::*;
 pub mod gate;
 pub use gate::*;
 
-pub mod impulse;
-pub use impulse::*;
+pub mod series;
+pub use series::*;
 
 pub mod input;
 pub use input::*;
@@ -172,7 +176,7 @@ pub use type_info::*;
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
 
-extern crate self as bevy_impulse;
+extern crate self as crossflow;
 
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
@@ -188,7 +192,7 @@ extern crate self as bevy_impulse;
 ///
 /// ```
 /// use bevy_ecs::prelude::*;
-/// use bevy_impulse::prelude::*;
+/// use crossflow::prelude::*;
 ///
 /// #[derive(Component, Resource)]
 /// struct Precision(i32);
@@ -210,7 +214,7 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
     pub streams: Streams::StreamBuffers,
     /// The entity providing the service
     pub provider: Entity,
-    /// The node in a workflow or impulse chain that asked for the service
+    /// The node in a workflow or series that asked for the service
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
@@ -238,7 +242,7 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
     pub channel: Channel,
     /// The entity providing the service
     pub provider: Entity,
-    /// The node in a workflow or impulse chain that asked for the service
+    /// The node in a workflow or series that asked for the service
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
@@ -273,7 +277,7 @@ pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
     pub streams: Streams::StreamBuffers,
-    /// The node in a workflow or impulse chain that asked for the callback
+    /// The node in a workflow or series that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
@@ -297,7 +301,7 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// The channel that allows querying and syncing with the world while the
     /// callback executes asynchronously.
     pub channel: Channel,
-    /// The node in a workflow or impulse chain that asked for the callback
+    /// The node in a workflow or series that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
@@ -315,7 +319,7 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
     pub streams: Streams::StreamBuffers,
-    /// The node in a workflow or impulse chain that asked for the callback
+    /// The node in a workflow or series that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
@@ -338,24 +342,24 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// The channel that allows querying and syncing with the world while the
     /// map executes asynchronously.
     pub channel: Channel,
-    /// The node in a workflow or impulse chain that asked for the callback
+    /// The node in a workflow or series that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
 }
 
-/// This plugin simply adds [`flush_impulses()`] to the [`Update`] schedule of your
-/// applicatation. For more fine-grained control you can call `flush_impulses`
+/// This plugin simply adds [`flush_execution()`] to the [`Update`] schedule of your
+/// applicatation. For more fine-grained control you can call `flush_execution`
 /// yourself and configure its relationship to other systems as you see fit.
 ///
-/// If you do not have at least one usage of `flush_impulses()` somewhere in
+/// If you do not have at least one usage of `flush_execution()` somewhere in
 /// your application then workflows will not work.
 #[derive(Default)]
-pub struct ImpulsePlugin {}
+pub struct CrossflowPlugin {}
 
-impl Plugin for ImpulsePlugin {
+impl Plugin for CrossflowPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, flush_impulses());
+        app.add_systems(Update, flush_execution());
 
         #[cfg(feature = "trace")]
         {
@@ -364,16 +368,20 @@ impl Plugin for ImpulsePlugin {
     }
 }
 
-/// This plugin adds [`ImpulsePlugin`] plus a few more that allows plus a few
+/// This plugin adds [`CrossflowPlugin`] plus a few more that allows plus a few
 /// more plugins that allow create a sufficient but minimal app for executing
 /// workflows.
+///
+/// Use [`CrossflowPlugin`] if you want to use crossflow as a library within an
+/// existing app. Use [`CrossflowExecutorApp`] if you want to set up an app from
+/// scratch whose main purpose is to execute workflows.
 #[derive(Default)]
-pub struct ImpulseAppPlugin {}
+pub struct CrossflowExecutorApp {}
 
-impl Plugin for ImpulseAppPlugin {
+impl Plugin for CrossflowExecutorApp {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            ImpulsePlugin::default(),
+            CrossflowPlugin::default(),
             bevy_app::TaskPoolPlugin::default(),
             bevy_diagnostic::FrameCountPlugin,
             bevy_app::ScheduleRunnerPlugin::default(),
@@ -393,14 +401,14 @@ pub mod prelude {
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
         chain::{Chain, ForkCloneBuilder, UnzipBuilder, Unzippable},
-        flush::flush_impulses,
-        impulse::{Impulse, Recipient},
+        flush::flush_execution,
         map::{AsMap, IntoAsyncMap, IntoBlockingMap},
         map_once::{AsMapOnce, IntoAsyncMapOnce, IntoBlockingMapOnce},
         node::{ForkCloneOutput, InputSlot, Node, Output},
         promise::{Promise, PromiseState},
         provider::{ProvideOnce, Provider},
         request::{RequestExt, RunCommandsOnWorldExt},
+        series::{Recipient, Series},
         service::{
             traits::*, AddContinuousServicesExt, AddServicesExt, AsDeliveryInstructions,
             DeliveryInstructions, DeliveryLabel, DeliveryLabelId, IntoAsyncService,
@@ -412,7 +420,7 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
-        ImpulseAppPlugin, ImpulsePlugin,
+        CrossflowExecutorApp, CrossflowPlugin,
     };
 
     pub use bevy_ecs::prelude::{In, World};

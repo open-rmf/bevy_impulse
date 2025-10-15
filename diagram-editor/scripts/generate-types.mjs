@@ -117,7 +117,7 @@ async function generate(name, schema, outputPath, preprocessedOutputPath) {
 }
 
 const apiSchema = execSync(
-  'cargo run -p bevy_impulse_diagram_editor -F json_schema --bin print_schema',
+  'cargo run -p crossflow_diagram_editor -F json_schema --bin print_schema',
   {
     encoding: 'utf-8',
     stdio: 'pipe',

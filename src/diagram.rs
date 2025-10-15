@@ -397,7 +397,7 @@ pub struct Diagram {
     /// triggered. You can decide whether that event contains the serialized
     /// message data that triggered the operation.
     ///
-    /// If bevy_impulse is not compiled with the "trace" feature then this
+    /// If crossflow is not compiled with the "trace" feature then this
     /// setting will have no effect.
     #[serde(default, skip_serializing_if = "is_default")]
     pub default_trace: TraceToggle,
@@ -465,7 +465,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::*;
+    /// use crossflow::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
@@ -541,7 +541,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::*;
+    /// use crossflow::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();

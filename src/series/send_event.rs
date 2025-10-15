@@ -15,45 +15,35 @@
  *
 */
 
-use bevy_ecs::prelude::{Component, Entity};
-
 use crate::{
-    add_lifecycle_dependency, Impulsive, Input, InputBundle, ManageInput, OperationRequest,
-    OperationResult, OperationSetup, OrBroken, Storage,
+    Executable, Input, InputBundle, ManageInput, OperationRequest, OperationResult, OperationSetup,
+    OrBroken,
 };
+use bevy_ecs::prelude::Event;
 
-#[derive(Component)]
-pub(crate) struct Store<T> {
-    target: Entity,
+pub(crate) struct SendEvent<T> {
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T> Store<T> {
-    pub(crate) fn new(target: Entity) -> Self {
+impl<T> SendEvent<T> {
+    pub(crate) fn new() -> Self {
         Self {
-            target,
             _ignore: Default::default(),
         }
     }
 }
 
-impl<T: 'static + Send + Sync> Impulsive for Store<T> {
+impl<T: 'static + Send + Sync + Event> Executable for SendEvent<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        add_lifecycle_dependency(source, self.target, world);
-        world
-            .entity_mut(source)
-            .insert((InputBundle::<T>::new(), self));
+        world.entity_mut(source).insert(InputBundle::<T>::new());
         Ok(())
     }
 
     fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data } = source_mut.take_input::<T>()?;
-        let target = source_mut.get::<Store<T>>().or_broken()?.target;
-        if let Ok(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert(Storage { data, session });
-        }
-        world.entity_mut(source).despawn();
+        let Input { data, .. } = source_mut.take_input::<T>()?;
+        source_mut.despawn();
+        world.send_event(data);
         Ok(())
     }
 }

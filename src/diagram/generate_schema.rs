@@ -1,4 +1,4 @@
-use bevy_impulse::{Diagram, DiagramElementRegistry};
+use crossflow::{Diagram, DiagramElementRegistry};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Diagram);
