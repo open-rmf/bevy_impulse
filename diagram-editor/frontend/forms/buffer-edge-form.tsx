@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import type { EdgeChange } from '@xyflow/react';
 import { useId, useMemo } from 'react';
-import { type BufferEdge, BufferPullType } from '../edges';
+import { type BufferEdge, BufferFetchType } from '../edges';
 import { useNodeManager } from '../node-manager';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
@@ -203,11 +203,11 @@ export function BufferEdgeInputForm({
       )}
       {nodeManager.getNode(edge.target).type === 'join' && (
         <FormControl>
-          <InputLabel id={`${labelId}-pull-type`}>Pull Type</InputLabel>
+          <InputLabel id={`${labelId}-fetch-type`}>Fetch Type</InputLabel>
           <Select
             labelId={labelId}
-            label="Pull Type"
-            value={edge.data.input.pull_type || BufferPullType.Pull}
+            label="Fetch Type"
+            value={edge.data.input.fetch_type || BufferFetchType.Pull}
             onChange={(ev) => {
               onChange?.({
                 type: 'replace',
@@ -218,15 +218,15 @@ export function BufferEdgeInputForm({
                     ...edge.data,
                     input: {
                       ...edge.data.input,
-                      pull_type: ev.target.value,
+                      fetch_type: ev.target.value,
                     },
                   },
                 } as BufferEdge,
               });
             }}
           >
-            <MenuItem value={BufferPullType.Pull}>Pull</MenuItem>
-            <MenuItem value={BufferPullType.Clone}>Clone</MenuItem>
+            <MenuItem value={BufferFetchType.Pull}>Pull</MenuItem>
+            <MenuItem value={BufferFetchType.Clone}>Clone</MenuItem>
           </Select>
         </FormControl>
       )}

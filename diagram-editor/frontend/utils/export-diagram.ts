@@ -1,6 +1,6 @@
 import equal from 'fast-deep-equal';
 import {
-  BufferPullType,
+  BufferFetchType,
   type DiagramEditorEdge,
   type StreamOutEdge,
 } from '../edges';
@@ -143,7 +143,7 @@ function syncBufferSelection(
     }
 
     if (targetOp.type === 'join') {
-      if (edge.data.input.pull_type === BufferPullType.Clone) {
+      if (edge.data.input.fetch_type === BufferFetchType.Clone) {
         if (!targetOp.clone) {
           targetOp.clone = [];
         }

@@ -5,7 +5,7 @@ export type SectionInputSlotData = {
   inputId: string;
 };
 
-export enum BufferPullType {
+export enum BufferFetchType {
   Pull,
   Clone,
 }
@@ -13,17 +13,17 @@ export enum BufferPullType {
 export type BufferKeyInputSlotData = {
   type: 'bufferKey';
   key: string;
-  pull_type?: BufferPullType;
+  fetch_type?: BufferFetchType;
 };
 
 export type BufferSeqInputSlotData = {
   type: 'bufferSeq';
   seq: number;
-  pull_type?: BufferPullType;
+  fetch_type?: BufferFetchType;
 };
 
 export type SectionBufferInputSlotData = {
   type: 'sectionBuffer';
   inputId: string;
-  pull_type?: BufferPullType;
+  fetch_type?: BufferFetchType;
 };
