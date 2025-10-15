@@ -23,7 +23,7 @@ use serde_json::Value;
 
 use crate::{
     Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
-    OperationResult, SplitDispatcher, Splittable,
+    OperationResult, SplitDispatcher, Splittable, is_default,
 };
 
 use super::{
@@ -100,11 +100,17 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SplitSchema {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub sequential: Vec<NextOperation>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub keyed: HashMap<String, NextOperation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining: Option<NextOperation>,
+    // TODO(@mxgrey): Consider what kind of settings we could provide to let
+    // users choose whether to include the identifier in the messages that get
+    // split out. For now the outputs of a split will only include the value, and
+    // drop the identifier information because we believe that is what users will
+    // almost always want.
     #[serde(flatten)]
     pub trace_settings: TraceSettings,
 }
@@ -136,7 +142,8 @@ impl BuildDiagramOperation for SplitSchema {
 
 impl Splittable for Value {
     type Key = MapSplitKey<String>;
-    type Item = (JsonPosition, Value);
+    type Identifier = JsonPosition;
+    type Item = Value;
 
     fn validate(_: &Self::Key) -> bool {
         true
@@ -146,7 +153,7 @@ impl Splittable for Value {
         MapSplitKey::next(key)
     }
 
-    fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
+    fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Identifier, Self::Item>) -> OperationResult {
         match self {
             Value::Array(array) => {
                 for (index, value) in array.into_iter().enumerate() {
@@ -276,15 +283,27 @@ where
         let mut outputs = Vec::new();
         let mut split = split.build(builder);
         for (key, target) in &split_op.keyed {
-            outputs.push((target.clone(), split.specific_output(key.clone())?.into()));
+            let output = split.specific_chain(
+                key.clone(),
+                |chain| chain.map_block(|(_, value)| value).output()
+            )?;
+
+            outputs.push((target.clone(), output.into()));
         }
 
         for (i, target) in split_op.sequential.iter().enumerate() {
-            outputs.push((target.clone(), split.sequential_output(i)?.into()))
+            let output = split.sequential_chain(
+                i,
+                |chain| chain.map_block(|(_, value)| value).output()
+            )?;
+
+            outputs.push((target.clone(), output.into()))
         }
 
         if let Some(remaining_target) = &split_op.remaining {
-            outputs.push((remaining_target.clone(), split.remaining_output()?.into()));
+            let output = split
+                .remaining_chain(|chain| chain.map_block(|(_, value)| value).output())?;
+            outputs.push((remaining_target.clone(), output.into()));
         }
 
         Ok(DynSplit {
@@ -464,7 +483,7 @@ mod tests {
             .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
-        assert_eq!(result[1], 1);
+        assert_eq!(result, 1);
     }
 
     #[test]
@@ -504,14 +523,14 @@ mod tests {
             .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
-        assert_eq!(result[1], 2);
+        assert_eq!(result, 2);
     }
 
     #[test]
     fn test_split_map() {
         let mut fixture = DiagramTestFixture::new();
 
-        fn split_map(_: i64) -> HashMap<String, i64> {
+        fn split_map(_: ()) -> HashMap<String, i64> {
             HashMap::from([
                 ("a".to_string(), 1),
                 ("b".to_string(), 2),
@@ -545,17 +564,17 @@ mod tests {
         .unwrap();
 
         let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, JsonMessage::from(4))
+            .spawn_and_run(&diagram, ())
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
-        assert_eq!(result[1], 2);
+        assert_eq!(result, 2);
     }
 
     #[test]
     fn test_split_dual_key_seq() {
         let mut fixture = DiagramTestFixture::new();
 
-        fn split_map(_: i64) -> HashMap<String, i64> {
+        fn split_map(_: ()) -> HashMap<String, i64> {
             HashMap::from([("a".to_string(), 1), ("b".to_string(), 2)])
         }
 
@@ -586,18 +605,18 @@ mod tests {
         .unwrap();
 
         let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, JsonMessage::from(4))
+            .spawn_and_run(&diagram, ())
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         // "a" is "eaten" up by the keyed path, so we should be the result of "b".
-        assert_eq!(result[1], 2);
+        assert_eq!(result, 2);
     }
 
     #[test]
     fn test_split_remaining() {
         let mut fixture = DiagramTestFixture::new();
 
-        fn split_list(_: i64) -> Vec<i64> {
+        fn split_list(_: ()) -> Vec<i64> {
             vec![1, 2, 3]
         }
 
@@ -628,24 +647,15 @@ mod tests {
         .unwrap();
 
         let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, JsonMessage::from(4))
+            .spawn_and_run(&diagram, ())
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
-        assert_eq!(result[1], 2);
+        assert_eq!(result, 2);
     }
 
     #[test]
     fn test_split_start() {
         let mut fixture = DiagramTestFixture::new();
-
-        fn get_split_value(pair: (JsonPosition, serde_json::Value)) -> serde_json::Value {
-            pair.1
-        }
-
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("get_split_value".to_string()),
-            |builder, _config: ()| builder.create_map_block(get_split_value),
-        );
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -653,12 +663,7 @@ mod tests {
             "ops": {
                 "split": {
                     "type": "split",
-                    "sequential": ["getSplitValue"],
-                },
-                "getSplitValue": {
-                    "type": "node",
-                    "builder": "get_split_value",
-                    "next": { "builtin": "terminate" },
+                    "sequential": [{ "builtin" : "terminate" }],
                 },
             },
         }))

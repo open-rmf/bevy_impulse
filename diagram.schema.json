@@ -804,8 +804,7 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/NextOperation"
-          },
-          "default": {}
+          }
         },
         "remaining": {
           "anyOf": [
@@ -819,7 +818,6 @@
         },
         "sequential": {
           "type": "array",
-          "default": [],
           "items": {
             "$ref": "#/$defs/NextOperation"
           }

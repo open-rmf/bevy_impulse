@@ -37,7 +37,7 @@ pub(crate) struct OperateSplit<T: Splittable> {
     /// Every iteration this must be reset to all None values. If any one of them
     /// is a None after the Splittable has filled it in, we must issue a disposal
     /// notice because one of the outputs might not be receiving anything.
-    outputs_cache: Option<Vec<Vec<T::Item>>>,
+    outputs_cache: Option<Vec<Vec<(T::Identifier, T::Item)>>>,
 }
 
 impl<T: Splittable> Default for OperateSplit<T> {
