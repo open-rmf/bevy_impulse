@@ -819,7 +819,14 @@
         "sequential": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/NextOperation"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NextOperation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "trace": {

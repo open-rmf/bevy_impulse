@@ -1,6 +1,9 @@
 import equal from 'fast-deep-equal';
 import {
   BufferFetchType,
+  BufferKeyInputSlotData,
+  BufferSeqInputSlotData,
+  SectionBufferInputSlotData,
   type DiagramEditorEdge,
   type StreamOutEdge,
 } from '../edges';
@@ -147,7 +150,12 @@ function syncBufferSelection(
         if (!targetOp.clone) {
           targetOp.clone = [];
         }
-        targetOp.clone.push(sourceNode.data.opId);
+        if (edge.data.input?.type === 'bufferSeq') {
+          targetOp.clone.push(edge.data.input.seq);
+        }
+        if (edge.data.input?.type === 'bufferKey') {
+          targetOp.clone.push(edge.data.input.key);
+        }
       }
     }
   }
@@ -257,8 +265,7 @@ function syncEdge(
             }
             // this works because js allows non-sequential arrays
             const next = nodeManager.getTargetNextOp(edge);
-            sourceOp.sequential[edge.data.output.seq] =
-              next ? next : { builtin: 'dispose' };
+            sourceOp.sequential[edge.data.output.seq] = next;
             break;
           }
           case 'splitRemaining': {

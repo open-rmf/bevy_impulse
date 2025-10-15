@@ -101,7 +101,7 @@ use super::{
 #[serde(rename_all = "snake_case")]
 pub struct SplitSchema {
     #[serde(default, skip_serializing_if = "is_default")]
-    pub sequential: Vec<NextOperation>,
+    pub sequential: Vec<Option<NextOperation>>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub keyed: HashMap<String, NextOperation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -292,12 +292,21 @@ where
         }
 
         for (i, target) in split_op.sequential.iter().enumerate() {
-            let output = split.sequential_chain(
-                i,
-                |chain| chain.map_block(|(_, value)| value).output()
-            )?;
+            if let Some(target) = target {
+                let output = split.sequential_chain(
+                    i,
+                    |chain| chain.map_block(|(_, value)| value).output()
+                )?;
 
-            outputs.push((target.clone(), output.into()))
+                outputs.push((target.clone(), output.into()))
+            } else {
+                // We allow the user to pass in a null for elements within a
+                // sequence, and we will treat them the same as disposing.
+                //
+                // We need to include this call to .sequential_output because we
+                // need to keep the sequence moving along for the SplitBuilder.
+                let _ = split.sequential_output(i)?;
+            }
         }
 
         if let Some(remaining_target) = &split_op.remaining {
@@ -639,7 +648,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "sequential": [{ "builtin": "dispose" }],
+                    "sequential": [null],
                     "remaining": { "builtin": "terminate" },
                 },
             },
