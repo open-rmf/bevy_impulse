@@ -69,7 +69,7 @@ use super::{
 /// remaining animals go to the zoo.
 ///
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "select_animals",

@@ -2,7 +2,7 @@ use crate::api::{api_router, ApiOptions};
 #[cfg(feature = "frontend")]
 use crate::frontend;
 use axum::Router;
-use bevy_impulse::DiagramElementRegistry;
+use crossflow::DiagramElementRegistry;
 
 #[derive(Default)]
 #[non_exhaustive]

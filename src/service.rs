@@ -28,7 +28,7 @@ use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, World},
     schedule::ScheduleLabel,
 };
-pub use bevy_impulse_derive::DeliveryLabel;
+pub use crossflow_derive::DeliveryLabel;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -804,10 +804,10 @@ mod tests {
     fn test_event_streaming_service() {
         let mut context = TestingContext::minimal_plugins();
 
-        // Add impulse flushes before and after the Update schedule so that the
+        // Add flushes before and after the Update schedule so that the
         // request and streams can all be processed within one cycle.
-        context.app.add_systems(PreUpdate, flush_impulses());
-        context.app.add_systems(PostUpdate, flush_impulses());
+        context.app.add_systems(PreUpdate, flush_execution());
+        context.app.add_systems(PostUpdate, flush_execution());
 
         context.app.add_event::<CustomEvent>();
         let event_streamer = context

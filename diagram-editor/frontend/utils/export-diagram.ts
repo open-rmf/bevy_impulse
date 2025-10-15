@@ -423,7 +423,7 @@ export function exportDiagram(
 ): Diagram {
   const diagram: Diagram = {
     $schema:
-      'https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json',
+      'https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json',
     version: '0.1.0',
     templates,
     start: { builtin: 'dispose' },

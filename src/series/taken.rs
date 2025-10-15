@@ -20,9 +20,9 @@ use bevy_ecs::prelude::Component;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use crate::{
-    promise::private::Sender as PromiseSender, ImpulseLifecycleChannel, Impulsive, Input,
-    InputBundle, ManageInput, OnTerminalCancelled, OperationCancel, OperationRequest,
-    OperationResult, OperationSetup, OrBroken,
+    promise::private::Sender as PromiseSender, Executable, Input, InputBundle, ManageInput,
+    OnTerminalCancelled, OperationCancel, OperationRequest, OperationResult, OperationSetup,
+    OrBroken, SeriesLifecycleChannel,
 };
 
 #[derive(Component)]
@@ -36,10 +36,10 @@ impl<T> TakenResponse<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
+impl<T: 'static + Send + Sync> Executable for TakenResponse<T> {
     fn setup(mut self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let lifecycle_sender = world
-            .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
+            .get_resource_or_insert_with(SeriesLifecycleChannel::default)
             .sender
             .clone();
         self.sender.on_promise_drop(move || {
@@ -76,7 +76,7 @@ impl<T> TakenStream<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Impulsive for TakenStream<T> {
+impl<T: 'static + Send + Sync> Executable for TakenStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world
             .entity_mut(source)

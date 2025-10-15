@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    dispatch_service, ActiveTasksStorage, AddImpulse, Cleanup, CleanupContents,
-    DisposeForUnavailableService, FinalizeCleanup, FinalizeCleanupRequest, Impulsive, Input,
+    dispatch_service, ActiveTasksStorage, AddExecution, Cleanup, CleanupContents,
+    DisposeForUnavailableService, Executable, FinalizeCleanup, FinalizeCleanupRequest, Input,
     InputBundle, ManageDisposal, ManageInput, OperateService, Operation, OperationCleanup,
     OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
     ProviderStorage, ReachabilityResult, ScopeStorage, Service, ServiceRequest, SingleInputStorage,
@@ -84,7 +84,7 @@ where
         let finish = world
             .spawn((InputBundle::<Response>::new(), InjectionSource(source)))
             .id();
-        AddImpulse::new(None, finish, InjectionFinish::<Response>::new()).apply(world);
+        AddExecution::new(None, finish, InjectionFinish::<Response>::new()).apply(world);
 
         let task = world
             .spawn((
@@ -278,7 +278,7 @@ impl<Response> InjectionFinish<Response> {
     }
 }
 
-impl<Response> Impulsive for InjectionFinish<Response>
+impl<Response> Executable for InjectionFinish<Response>
 where
     Response: 'static + Send + Sync,
 {

@@ -54,23 +54,38 @@ pub(crate) use store::*;
 mod taken;
 pub(crate) use taken::*;
 
-/// Impulses can be chained as a simple sequence of [providers](crate::Provider).
-pub struct Impulse<'w, 's, 'a, Response, Streams> {
+/// A series of one or more workflow execution sessions. You can use a [`Series`]
+/// to chain the output of one workflow session into the input of another workflow
+/// session, and then eventually receive the final output of the whole series.
+///
+/// A series like this can only be a linear sequence, it does not support
+/// conditional branching or cycles. If you want a more complex structure than
+/// a linear sequence then you will need to spawn a workflow with the structure
+/// that you want, and then issue a request into that workflow.
+///
+/// A series is a one-time-use sequence of sessions. You will have to reconstruct
+/// the series each time you want to call it.
+///
+/// Note that the entire series of sessions will automatically cancel if you
+/// drop the final promise of the last session in the series. To prevent that
+/// from happening, you can use [`Series::detach`] to lock in the execution of
+/// the series (or a subset of the series) no matter what happens downstream.
+pub struct Series<'w, 's, 'a, Response, Streams> {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
     pub(crate) commands: &'a mut Commands<'w, 's>,
     pub(crate) _ignore: std::marker::PhantomData<fn(Response, Streams)>,
 }
 
-impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
+impl<'w, 's, 'a, Response, Streams> Series<'w, 's, 'a, Response, Streams>
 where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    /// Keep executing the impulse chain up to here even if a downstream
-    /// dependent gets dropped. If you continue building the chain from this
-    /// point, then the later impulses will not be affected by this use of
-    /// `.detach()` and may be dropped if its downstream dependent gets dropped.
+    /// Keep executing the series up to here even if a downstream dependent gets
+    /// dropped. If you continue building the series from this point, then the
+    /// later sessions will not be affected by this use of `.detach()` and may
+    /// be dropped if its downstream dependent gets dropped.
     ///
     /// Dependency gets dropped in the following situations:
     ///
@@ -79,15 +94,15 @@ where
     /// | [`Self::take`] <br> [`Self::take_response`]               | The promise containing the final response is dropped. |
     /// | [`Self::store`] <br> [`Self::push`] <br> [`Self::insert`] | The target entity of the operation is despawned.      |
     /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
-    /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
-    pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
+    /// | Using none of the above                                   | The series will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
+    pub fn detach(self) -> Series<'w, 's, 'a, Response, Streams> {
         self.commands.queue(Detach {
             target: self.target,
         });
         self
     }
 
-    /// This is the session ID of the last request so far in the impulse chain.
+    /// This is the session ID of the last request so far in the series.
     pub fn session_id(&self) -> Entity {
         self.source
     }
@@ -97,7 +112,7 @@ where
     #[must_use]
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
@@ -116,7 +131,7 @@ where
     /// Take only the response data that comes out of the request.
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
@@ -129,22 +144,22 @@ where
     pub fn then<P: ProvideOnce<Request = Response>>(
         self,
         provider: P,
-    ) -> Impulse<'w, 's, 'a, P::Response, P::Streams> {
+    ) -> Series<'w, 's, 'a, P::Response, P::Streams> {
         let source = self.target;
         let target = self
             .commands
-            .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
+            .spawn((Detached::default(), UnusedTarget, SeriesMarker))
             .id();
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
         self.commands
             .entity(source)
-            .insert((Cancellable::new(cancel_impulse), ImpulseMarker))
+            .insert((Cancellable::new(cancel_execution), SeriesMarker))
             .remove::<UnusedTarget>()
             .insert(ChildOf(target));
         provider.connect(None, source, target, self.commands);
-        Impulse {
+        Series {
             source,
             target,
             commands: self.commands,
@@ -162,7 +177,7 @@ where
     pub fn map_block<U>(
         self,
         f: impl FnOnce(Response) -> U + 'static + Send + Sync,
-    ) -> Impulse<'w, 's, 'a, U, ()>
+    ) -> Series<'w, 's, 'a, U, ()>
     where
         U: 'static + Send + Sync,
     {
@@ -172,14 +187,14 @@ where
     /// Apply a one-time callback whose output is a [`Future`] that will be run
     /// in the [`AsyncComputeTaskPool`][1] (unless the `single_threaded_async`
     /// feature is active). The output of the [`Future`] will be the Response of
-    /// the returned Impulse.
+    /// the returned Series.
     ///
     /// [1]: bevy_tasks::AsyncComputeTaskPool
     #[must_use]
     pub fn map_async<Task>(
         self,
         f: impl FnOnce(Response) -> Task + 'static + Send + Sync,
-    ) -> Impulse<'w, 's, 'a, Task::Output, ()>
+    ) -> Series<'w, 's, 'a, Task::Output, ()>
     where
         Task: Future + 'static + Sendish,
         Task::Output: 'static + Send + Sync,
@@ -196,7 +211,7 @@ where
     pub fn map<M, F: AsMapOnce<M>>(
         self,
         f: F,
-    ) -> Impulse<
+    ) -> Series<
         'w,
         's,
         'a,
@@ -220,7 +235,7 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             Store::<Response>::new(target),
@@ -237,14 +252,14 @@ where
     /// specified target, one collection for each stream data type. You must
     /// still decide what to do with the final response data.
     #[must_use]
-    pub fn collect_streams(self, target: Entity) -> Impulse<'w, 's, 'a, Response, ()> {
+    pub fn collect_streams(self, target: Entity) -> Series<'w, 's, 'a, Response, ()> {
         let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
         self.commands
             .entity(self.source)
             .insert((stream_targets, map));
 
-        Impulse {
+        Series {
             source: self.source,
             target: self.target,
             commands: self.commands,
@@ -261,7 +276,7 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn push(self, target: Entity) {
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             Push::<Response>::new(target, false),
@@ -276,12 +291,12 @@ where
 
     // TODO(@mxgrey): Consider offering ways for users to respond to cancellations.
     // For example, offer an on_cancel method that lets users provide a callback
-    // to be triggered when a cancellation happens. Or focus on terminal impulses,
-    // like offer store_or_else(~), push_or_else(~) etc which accept a callback
-    // that will be triggered after a cancellation.
+    // to be triggered when a cancellation happens. Or focus on the terminal end
+    // of a series, like offer store_or_else(~), push_or_else(~) etc which accept
+    // a callback that will be triggered after a cancellation.
 }
 
-impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
+impl<'w, 's, 'a, Response, Streams> Series<'w, 's, 'a, Response, Streams>
 where
     Response: Bundle,
 {
@@ -295,7 +310,7 @@ where
     /// [`Self::store`] or [`Self::push`]. Alternatively you can transform it
     /// into a bundle using [`Self::map_block`] or [`Self::map_async`].
     pub fn insert(self, target: Entity) {
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             Insert::<Response>::new(target),
@@ -303,16 +318,16 @@ where
     }
 }
 
-impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
+impl<'w, 's, 'a, Response, Streams> Series<'w, 's, 'a, Response, Streams>
 where
     Response: Event,
 {
     /// Send the response out as an event once it is ready. Stream data will be
     /// dropped unless you use [`Self::collect_streams`] before this.
     ///
-    /// Using this will also effectively [detach](Self::detach) the impulse.
+    /// Using this will also effectively [detach](Self::detach) the series.
     pub fn send_event(self) {
-        self.commands.queue(AddImpulse::new(
+        self.commands.queue(AddExecution::new(
             Some(self.source),
             self.target,
             SendEvent::<Response>::new(),
@@ -320,23 +335,28 @@ where
     }
 }
 
-/// Contains the final response and streams produced at the end of an impulse chain.
+/// Contains the final response and streams produced at the end of a series.
 pub struct Recipient<Response, Streams: StreamPack> {
     pub response: Promise<Response>,
     pub streams: Streams::StreamReceivers,
-    /// The root session ID of the entire impulse chain. Every session ID related
-    /// to this chain is a descendent of this entity.
+    /// The root session ID of the entire series. Every session ID related to
+    /// this series is a descendent of this entity.
+    ///
+    /// This may be counter-intuitive because this is the last session in the
+    /// series but structurally we have made it the parent of all the sessions
+    /// that will be executed before it. This is done so that despawning behavior
+    /// has a more logical relationship with the dependencies between the sessions.
     pub session: Entity,
 }
 
-/// Used to store a response of an impulse as a component of an entity.
+/// Used to store a response of a series as a component of an entity.
 #[derive(Component)]
 pub struct Storage<T> {
     pub data: T,
     pub session: Entity,
 }
 
-/// Used to collect responses from multiple impulse chains into a container
+/// Used to collect responses from multiple series chains into a container
 /// attached to an entity.
 //
 // TODO(@mxgrey): Consider allowing the user to choose the container type.
@@ -508,7 +528,7 @@ mod tests {
     #[test]
     fn test_detach() {
         // This is a regression test that covers a bug which existed due to
-        // an incorrect handling of detached impulses when giving input.
+        // an incorrect handling of detached series when giving input.
         let mut context = TestingContext::minimal_plugins();
         let service = context.spawn_delayed_map(Duration::from_millis(1), |n| *n + 1);
 
@@ -541,7 +561,7 @@ mod tests {
     struct UnitLabel;
 
     // TODO(@mxgrey) Figure out how to make the DeliveryLabel macro usable
-    // within the core bevy_impulse library
+    // within the core crossflow library
     impl DeliveryLabel for UnitLabel {
         fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
             Box::new(self.clone())

@@ -72,7 +72,7 @@ impl<'a> Ros2Registry<'a> {
                     builder.create_ros2_subscription::<T, JsonMessage>(ros2_node.clone(), config)
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         // For cancel sender
         self.registry
@@ -93,7 +93,7 @@ impl<'a> Ros2Registry<'a> {
                     Ok(node)
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         self
     }
@@ -120,11 +120,11 @@ impl<'a> Ros2Registry<'a> {
                     Ok(node)
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         self.registry
             .register_message::<Result<JsonMessage, String>>()
-            .with_fork_result();
+            .with_result();
 
         // For cancel sender
         self.registry
@@ -159,11 +159,11 @@ impl<'a> Ros2Registry<'a> {
                     Ok(node)
                 },
             )
-            .with_fork_result();
+            .with_result();
 
         self.registry
             .register_message::<Result<JsonMessage, String>>()
-            .with_fork_result();
+            .with_result();
 
         self.registry.register_message::<A::Feedback>();
         self.registry.register_message::<GoalStatus>();

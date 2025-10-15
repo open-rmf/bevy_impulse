@@ -27,7 +27,7 @@ use std::{rc::Rc, sync::Arc};
 
 use crate::{
     dyn_node::{DynStreamInputPack, DynStreamOutputPack},
-    AddImpulse, AddOperation, AnonymousStreamRedirect, Builder, DefaultStreamBufferContainer,
+    AddExecution, AddOperation, AnonymousStreamRedirect, Builder, DefaultStreamBufferContainer,
     DeferredRoster, InnerChannel, InputSlot, OperationError, OperationResult, OperationRoster,
     OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream, ReportUnhandled,
     SingleInputStorage, StreamAvailability, StreamBuffer, StreamChannel, StreamEffect, StreamPack,
@@ -111,13 +111,13 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
         let (sender, receiver) = unbounded_channel::<S::Output>();
         let target = commands
             .spawn(())
-            // Set the parent of this stream to be the impulse so it can be
+            // Set the parent of this stream to be the series so it can be
             // recursively despawned together.
             .insert(ChildOf(source))
             .id();
 
         map.add_anonymous::<S::Output>(target, commands);
-        commands.queue(AddImpulse::new(None, target, TakenStream::new(sender)));
+        commands.queue(AddExecution::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -129,7 +129,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
         commands: &mut Commands,
     ) {
         let redirect = commands.spawn(()).insert(ChildOf(source)).id();
-        commands.queue(AddImpulse::new(
+        commands.queue(AddExecution::new(
             None,
             redirect,
             Push::<S::Output>::new(target, true),

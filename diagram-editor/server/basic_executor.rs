@@ -17,18 +17,18 @@
 
 use crate::{new_router, ServerOptions};
 use bevy_app;
-use bevy_impulse::{
-    Diagram, DiagramError, ImpulseAppPlugin, Promise, RequestExt, RunCommandsOnWorldExt,
-};
 use clap::Parser;
+use crossflow::{
+    CrossflowExecutorApp, Diagram, DiagramError, Promise, RequestExt, RunCommandsOnWorldExt,
+};
 use std::thread;
 use std::{fs::File, str::FromStr};
 
-pub use bevy_impulse::DiagramElementRegistry;
+pub use crossflow::DiagramElementRegistry;
 pub use std::error::Error;
 
 pub mod prelude {
-    pub use bevy_impulse::prelude::*;
+    pub use crossflow::prelude::*;
 }
 
 #[derive(Parser, Debug)]
@@ -68,7 +68,7 @@ pub struct ServeArgs {
 
 pub fn headless(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     let mut app = bevy_app::App::new();
-    app.add_plugins(ImpulseAppPlugin::default());
+    app.add_plugins(CrossflowExecutorApp::default());
     let file = File::open(args.diagram).unwrap();
     let diagram = Diagram::from_reader(file)?;
 
@@ -99,7 +99,7 @@ pub async fn serve(
         // The App needs to be created in the same thread that it gets run in,
         // because App does not implement Send.
         let mut app = bevy_app::App::new();
-        app.add_plugins(ImpulseAppPlugin::default());
+        app.add_plugins(CrossflowExecutorApp::default());
         let router = new_router(&mut app, registry, ServerOptions::default());
         let _ = router_sender.send(router);
         app.run()

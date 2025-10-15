@@ -66,7 +66,7 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
         #[allow(non_camel_case_types, unused)]
         #vis struct #inputs #generics {
             #(
-                pub #field_idents: ::bevy_impulse::InputSlot<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
+                pub #field_idents: ::crossflow::InputSlot<<#stream_effects as ::crossflow::StreamEffect>::Input>,
             )*
         }
 
@@ -75,21 +75,21 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
         #[allow(non_camel_case_types, unused)]
         #vis struct #outputs #generics {
             #(
-                pub #field_idents: ::bevy_impulse::Output<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
+                pub #field_idents: ::crossflow::Output<<#stream_effects as ::crossflow::StreamEffect>::Output>,
             )*
         }
 
         #[allow(non_camel_case_types, unused)]
         #vis struct #receivers #generics {
             #(
-                pub #field_idents: ::bevy_impulse::Receiver<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
+                pub #field_idents: ::crossflow::Receiver<<#stream_effects as ::crossflow::StreamEffect>::Output>,
             )*
         }
 
         #[allow(non_camel_case_types, unused)]
         #vis struct #channels #generics {
             #(
-                pub #field_idents: ::bevy_impulse::NamedStreamChannel<#stream_effects>,
+                pub #field_idents: ::crossflow::NamedStreamChannel<#stream_effects>,
             )*
         }
 
@@ -98,7 +98,7 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
         #[allow(non_camel_case_types, unused)]
         #vis struct #buffers #generics {
             #(
-                pub #field_idents: ::bevy_impulse::NamedStreamBuffer<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
+                pub #field_idents: ::crossflow::NamedStreamBuffer<<#stream_effects as ::crossflow::StreamEffect>::Input>,
             )*
         }
 
@@ -106,20 +106,20 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
 
         impl #impl_generics #pack_ident #ty_generics #where_clause {
             #[allow(unused)]
-            fn __bevy_impulse_allow_unused_fields(&self) {
+            fn __crossflow_allow_unused_fields(&self) {
                 println!(
                     "This function suppresses unused field warnings. \
                     There is no need to call this. {:#?}",
                     [
                         #(
-                            (#field_names_str, ::bevy_impulse::re_exports::type_name_of_val(&self.#field_idents)),
+                            (#field_names_str, ::crossflow::re_exports::type_name_of_val(&self.#field_idents)),
                         )*
                     ]
                 );
             }
         }
 
-        impl #impl_generics ::bevy_impulse::StreamPack for #pack_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::StreamPack for #pack_ident #ty_generics #where_clause {
             type StreamInputPack = #inputs #ty_generics;
             type StreamOutputPack = #outputs #ty_generics;
             type StreamReceivers = #receivers #ty_generics;
@@ -127,12 +127,12 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
             type StreamBuffers = #buffers #ty_generics;
 
             fn spawn_scope_streams(
-                in_scope: ::bevy_impulse::re_exports::Entity,
-                out_scope: ::bevy_impulse::re_exports::Entity,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                in_scope: ::crossflow::re_exports::Entity,
+                out_scope: ::crossflow::re_exports::Entity,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
                 #(
-                    let (#input_streams, #output_streams) = ::bevy_impulse::NamedStream::< #stream_effects >::spawn_scope_stream(
+                    let (#input_streams, #output_streams) = ::crossflow::NamedStream::< #stream_effects >::spawn_scope_stream(
                         in_scope, out_scope, commands,
                     );
                 )*
@@ -147,72 +147,72 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
                 )
             }
 
-            fn spawn_workflow_streams(builder: &mut ::bevy_impulse::Builder) -> Self::StreamInputPack {
+            fn spawn_workflow_streams(builder: &mut ::crossflow::Builder) -> Self::StreamInputPack {
                 #inputs { #(
-                    #field_idents: ::bevy_impulse::NamedStream::< #stream_effects >::spawn_workflow_stream(#field_names_str, builder),
+                    #field_idents: ::crossflow::NamedStream::< #stream_effects >::spawn_workflow_stream(#field_names_str, builder),
                 )* }
             }
 
             fn spawn_node_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                builder: &mut ::bevy_impulse::Builder,
+                source: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                builder: &mut ::crossflow::Builder,
             ) -> Self::StreamOutputPack {
                 #outputs { #(
-                    #field_idents: ::bevy_impulse::NamedStream::< #stream_effects >::spawn_node_stream(#field_names_str, source, map, builder),
+                    #field_idents: ::crossflow::NamedStream::< #stream_effects >::spawn_node_stream(#field_names_str, source, map, builder),
                 )* }
             }
 
             fn take_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) -> Self::StreamReceivers {
                 #receivers { #(
-                    #field_idents: ::bevy_impulse::NamedStream::< #stream_effects >::take_stream(#field_names_str, source, map, commands),
+                    #field_idents: ::crossflow::NamedStream::< #stream_effects >::take_stream(#field_names_str, source, map, commands),
                 )* }
             }
 
             fn collect_streams(
-                source: ::bevy_impulse::re_exports::Entity,
-                target: ::bevy_impulse::re_exports::Entity,
-                map: &mut ::bevy_impulse::StreamTargetMap,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                target: ::crossflow::re_exports::Entity,
+                map: &mut ::crossflow::StreamTargetMap,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) {
                 #(
-                    ::bevy_impulse::NamedStream::< #stream_effects >::collect_stream(
+                    ::crossflow::NamedStream::< #stream_effects >::collect_stream(
                         #field_names_str, source, target, map, commands,
                     );
                 )*
             }
 
             fn make_stream_channels(
-                inner: &::std::sync::Arc<::bevy_impulse::InnerChannel>,
-                world: &::bevy_impulse::re_exports::World,
+                inner: &::std::sync::Arc<::crossflow::InnerChannel>,
+                world: &::crossflow::re_exports::World,
             ) -> Self::StreamChannels {
                 #channels { #(
-                    #field_idents: ::bevy_impulse::NamedStream::< #stream_effects >::make_stream_channel(#field_names_str, inner, world),
+                    #field_idents: ::crossflow::NamedStream::< #stream_effects >::make_stream_channel(#field_names_str, inner, world),
                 )* }
             }
 
             fn make_stream_buffers(
-                target_map: Option<&::bevy_impulse::StreamTargetMap>,
+                target_map: Option<&::crossflow::StreamTargetMap>,
             ) -> Self::StreamBuffers {
                 #buffers { #(
-                    #field_idents: ::bevy_impulse::NamedStream::< #stream_effects >::make_stream_buffer(target_map),
+                    #field_idents: ::crossflow::NamedStream::< #stream_effects >::make_stream_buffer(target_map),
                 )* }
             }
 
             fn process_stream_buffers(
                 buffer: Self::StreamBuffers,
-                source: ::bevy_impulse::re_exports::Entity,
-                session: ::bevy_impulse::re_exports::Entity,
-                unused: &mut ::bevy_impulse::UnusedStreams,
-                world: &mut ::bevy_impulse::re_exports::World,
-                roster: &mut ::bevy_impulse::OperationRoster,
-            ) -> ::bevy_impulse::OperationResult {
+                source: ::crossflow::re_exports::Entity,
+                session: ::crossflow::re_exports::Entity,
+                unused: &mut ::crossflow::UnusedStreams,
+                world: &mut ::crossflow::re_exports::World,
+                roster: &mut ::crossflow::OperationRoster,
+            ) -> ::crossflow::OperationResult {
                 #(
-                    ::bevy_impulse::NamedStream::< #stream_effects >::process_stream_buffer(
+                    ::crossflow::NamedStream::< #stream_effects >::process_stream_buffer(
                         #field_names_str, buffer.#field_idents, source, session, unused, world, roster,
                     )?;
                 )*
@@ -221,32 +221,32 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
 
             fn defer_buffers(
                 buffer: Self::StreamBuffers,
-                source: ::bevy_impulse::re_exports::Entity,
-                session: ::bevy_impulse::re_exports::Entity,
-                commands: &mut ::bevy_impulse::re_exports::Commands,
+                source: ::crossflow::re_exports::Entity,
+                session: ::crossflow::re_exports::Entity,
+                commands: &mut ::crossflow::re_exports::Commands,
             ) {
                 #(
-                    ::bevy_impulse::NamedStream::< #stream_effects >::defer_buffer(
+                    ::crossflow::NamedStream::< #stream_effects >::defer_buffer(
                         #field_names_str, buffer.#field_idents, source, session, commands,
                     );
                 )*
             }
 
-            fn set_stream_availability(availability: &mut ::bevy_impulse::StreamAvailability) {
+            fn set_stream_availability(availability: &mut ::crossflow::StreamAvailability) {
                 #(
-                    let _ = availability.add_named::<< #stream_effects as ::bevy_impulse::StreamEffect>::Output>(#field_names_str);
+                    let _ = availability.add_named::<< #stream_effects as ::crossflow::StreamEffect>::Output>(#field_names_str);
                 )*
             }
 
-            fn are_streams_available(availability: &::bevy_impulse::StreamAvailability) -> bool {
+            fn are_streams_available(availability: &::crossflow::StreamAvailability) -> bool {
                 true
                 #(
-                    && availability.has_named::<< #stream_effects as ::bevy_impulse::StreamEffect>::Output>(#field_names_str)
+                    && availability.has_named::<< #stream_effects as ::crossflow::StreamEffect>::Output>(#field_names_str)
                 )*
             }
 
             fn into_dyn_stream_input_pack(
-                pack: &mut ::bevy_impulse::dyn_node::DynStreamInputPack,
+                pack: &mut ::crossflow::dyn_node::DynStreamInputPack,
                 inputs: Self::StreamInputPack,
             ) {
                 #(
@@ -255,7 +255,7 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
             }
 
             fn into_dyn_stream_output_pack(
-                pack: &mut ::bevy_impulse::dyn_node::DynStreamOutputPack,
+                pack: &mut ::crossflow::dyn_node::DynStreamOutputPack,
                 outputs: Self::StreamOutputPack,
             ) {
                 #(
@@ -297,11 +297,11 @@ struct StructIdentities {
 impl StructIdentities {
     fn from_pack_struct(pack_struct: &ItemStruct) -> Result<Self, TokenStream> {
         let mut identities = Self {
-            inputs: format_ident!("__bevy_impulse_{}_StreamInputPack", pack_struct.ident),
-            outputs: format_ident!("__bevy_impulse_{}_StreamOutputPack", pack_struct.ident),
-            receivers: format_ident!("__bevy_impulse_{}_StreamReceivers", pack_struct.ident),
-            channels: format_ident!("__bevy_impulse_{}_StreamChannels", pack_struct.ident),
-            buffers: format_ident!("__bevy_impulse_{}_StreamBuffers", pack_struct.ident),
+            inputs: format_ident!("__crossflow_{}_StreamInputPack", pack_struct.ident),
+            outputs: format_ident!("__crossflow_{}_StreamOutputPack", pack_struct.ident),
+            receivers: format_ident!("__crossflow_{}_StreamReceivers", pack_struct.ident),
+            channels: format_ident!("__crossflow_{}_StreamChannels", pack_struct.ident),
+            buffers: format_ident!("__crossflow_{}_StreamBuffers", pack_struct.ident),
         };
 
         for attr in pack_struct.attrs.iter() {
@@ -387,7 +387,7 @@ impl StreamConfig {
                     } else {
                         let ty = &field.ty;
                         quote_spanned! { field.ty.span() =>
-                            ::bevy_impulse::StreamOf< #ty >
+                            ::crossflow::StreamOf< #ty >
                         }
                     };
 

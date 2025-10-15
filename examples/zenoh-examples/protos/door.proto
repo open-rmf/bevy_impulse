@@ -16,7 +16,7 @@
 */
 
 syntax = "proto3";
-package impulse.zenoh_examples;
+package crossflow.zenoh_examples;
 
 message DoorState {
     enum Status {

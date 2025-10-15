@@ -33,11 +33,11 @@ use super::{
 ///
 /// The output message will be sent to the operation specified by `next`.
 ///
-/// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
+/// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/crossflow/issues/43)
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "cutting_board",

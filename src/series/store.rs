@@ -15,20 +15,20 @@
  *
 */
 
-use bevy_ecs::prelude::{Bundle, Component, Entity};
+use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    add_lifecycle_dependency, Impulsive, Input, InputBundle, ManageInput, OperationRequest,
-    OperationResult, OperationSetup, OrBroken,
+    add_lifecycle_dependency, Executable, Input, InputBundle, ManageInput, OperationRequest,
+    OperationResult, OperationSetup, OrBroken, Storage,
 };
 
 #[derive(Component)]
-pub(crate) struct Insert<T> {
+pub(crate) struct Store<T> {
     target: Entity,
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T> Insert<T> {
+impl<T> Store<T> {
     pub(crate) fn new(target: Entity) -> Self {
         Self {
             target,
@@ -37,7 +37,7 @@ impl<T> Insert<T> {
     }
 }
 
-impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
+impl<T: 'static + Send + Sync> Executable for Store<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         add_lifecycle_dependency(source, self.target, world);
         world
@@ -48,12 +48,11 @@ impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
 
     fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { data, .. } = source_mut.take_input::<T>()?;
-        let target = source_mut.get::<Insert<T>>().or_broken()?.target;
+        let Input { session, data } = source_mut.take_input::<T>()?;
+        let target = source_mut.get::<Store<T>>().or_broken()?.target;
         if let Ok(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert(data);
+            target_mut.insert(Storage { data, session });
         }
-
         world.entity_mut(source).despawn();
         Ok(())
     }

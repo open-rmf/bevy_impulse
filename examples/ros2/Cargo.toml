@@ -17,10 +17,10 @@ path = "src/goal_requester.rs"
 
 [dependencies]
 # Dependency to help us run the diagram editor and executor
-bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../diagram-editor", features = ["basic_executor"] }
+crossflow_diagram_editor = { version = "0.0.1", path = "../../diagram-editor", features = ["basic_executor"] }
 
 # Dependencies for the nav operation catalog
-bevy_impulse = { version = "0.0.2", path = "../..", features = ["diagram", "ros2"] }
+crossflow = { version = "0.0.1", path = "../..", features = ["diagram", "ros2"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }

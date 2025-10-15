@@ -143,9 +143,9 @@ impl SingleInputStorage {
     }
 }
 
-/// Keep track of the sources that funnel into this link of the impulse chain.
-/// This is for links that draw from multiple sources simultaneously, such as
-/// join and race.
+/// Keep track of the sources that funnel into this element of the workflow.
+/// This is for elements that draw from multiple sources simultaneously, such as
+/// join and listen.
 #[derive(Component, Clone, Default)]
 pub struct FunnelInputStorage(pub(crate) SmallVec<[Entity; 8]>);
 
@@ -171,7 +171,7 @@ impl From<SmallVec<[Entity; 8]>> for FunnelInputStorage {
     }
 }
 
-/// Keep track of the target for a link in a impulse chain
+/// Keep track of the target for a link in a series
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SingleTargetStorage(Entity);
 
@@ -189,7 +189,7 @@ impl SingleTargetStorage {
     }
 }
 
-/// Keep track of the targets for a fork in a impulse chain
+/// Keep track of the targets for a fork in a workflow
 #[derive(Component, Clone, Default)]
 pub struct ForkTargetStorage(pub SmallVec<[Entity; 8]>);
 
@@ -228,7 +228,7 @@ pub struct OperationRoster {
     /// Tell a scope to attempt cleanup
     pub(crate) cleanup_finished: Vec<Cleanup>,
     /// Despawn these entities while no other operation is running. This is used
-    /// to cleanup detached impulses that receive no input.
+    /// to cleanup detached executions that receive no input.
     pub(crate) deferred_despawn: Vec<Entity>,
 }
 

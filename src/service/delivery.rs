@@ -41,11 +41,11 @@ where
         Delivery::Parallel(parallel) => {
             let label = label.expect(
                 "A request in a parallel async service was blocking without a label. \
-                Please report this to the bevy_impulse maintainers; this should not be possible.",
+                Please report this to the crossflow maintainers; this should not be possible.",
             );
             let serial = parallel.labeled.get_mut(&label).expect(
                 "A labeled request in a parallel async service finished but the queue \
-                for its label has been erased. Please report this to the bevy_impulse \
+                for its label has been erased. Please report this to the crossflow \
                 maintainers; this should not be possible.",
             );
             pop_next_delivery_impl::<Request>(provider, serial, serve_next)

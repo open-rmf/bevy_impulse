@@ -1,9 +1,9 @@
 use std::sync::Mutex;
 
-use bevy_impulse::DiagramElementRegistry;
+use crossflow::DiagramElementRegistry;
 
-pub use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
-use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app_wasm, ExecutorState};
+pub use crossflow_diagram_editor::api::executor::ExecutorOptions;
+use crossflow_diagram_editor::api::executor::{setup_bevy_app_wasm, ExecutorState};
 
 static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
 static BEVY_APP: Mutex<Option<bevy_app::SubApp>> = Mutex::new(None);

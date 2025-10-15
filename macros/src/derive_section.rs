@@ -55,13 +55,13 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
     let register_message: Vec<TokenStream> = zip(&field_type, &field_configs)
         .map(|(field_type, (_config, span))| {
             quote_spanned! {*span=>
-                let mut _message = _opt_out.register_message::<<#field_type as ::bevy_impulse::SectionItem>::MessageType>();
+                let mut _message = _opt_out.register_message::<<#field_type as ::crossflow::SectionItem>::MessageType>();
             }
         })
         .collect();
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::Section for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::crossflow::Section for #struct_ident #ty_generics #where_clause {
             fn into_slots(
                 self: Box<Self>,
             ) -> SectionSlots {
@@ -94,13 +94,13 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
             }
         }
 
-        impl #impl_generics ::bevy_impulse::SectionMetadataProvider for #struct_ident #ty_generics #where_clause {
-            fn metadata() -> &'static ::bevy_impulse::SectionMetadata {
-                static METADATA: ::std::sync::OnceLock<::bevy_impulse::SectionMetadata> = ::std::sync::OnceLock::new();
+        impl #impl_generics ::crossflow::SectionMetadataProvider for #struct_ident #ty_generics #where_clause {
+            fn metadata() -> &'static ::crossflow::SectionMetadata {
+                static METADATA: ::std::sync::OnceLock<::crossflow::SectionMetadata> = ::std::sync::OnceLock::new();
                 METADATA.get_or_init(|| {
-                    let mut metadata = ::bevy_impulse::SectionMetadata::new();
+                    let mut metadata = ::crossflow::SectionMetadata::new();
                     #(
-                        <#field_type as ::bevy_impulse::SectionItem>::build_metadata(
+                        <#field_type as ::crossflow::SectionItem>::build_metadata(
                             &mut metadata,
                             &#field_name_str,
                         );

@@ -39,7 +39,7 @@ use crate::{default_as_false, is_default, is_false, BufferIdentifier};
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "begin_measuring",
@@ -197,7 +197,7 @@ pub type JoinOutput<T> = SmallVec<[T; 4]>;
 
 #[cfg(test)]
 mod tests {
-    use bevy_impulse_derive::Joined;
+    use crossflow_derive::Joined;
     use serde_json::json;
     use test_log::test;
 

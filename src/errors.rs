@@ -104,14 +104,14 @@ pub struct StopTaskFailure {
     pub backtrace: Option<Backtrace>,
 }
 
-/// An impulse chain was dropped because its final target was unused but `detach()`
+/// A series chain was dropped because its final target was unused but `detach()`
 /// was not called on it. This is almost always a usage error, so we report it here.
 #[derive(Clone, Debug)]
 pub struct UnusedTargetDrop {
     /// Which target was dropped.
     pub unused_target: Entity,
-    /// Which impulses were dropped as a consequence of the unused target.
-    pub dropped_impulses: Vec<Entity>,
+    /// Which series were dropped as a consequence of the unused target.
+    pub dropped_series: Vec<Entity>,
 }
 
 /// Something went wrong while trying to connect a target into a source.

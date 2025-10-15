@@ -50,12 +50,12 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
     let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
 
     quote! {
-        impl #impl_generics ::bevy_impulse::DeliveryLabel for #struct_name #type_generics #where_clause {
+        impl #impl_generics ::crossflow::DeliveryLabel for #struct_name #type_generics #where_clause {
             fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
                 ::std::boxed::Box::new(::std::clone::Clone::clone(self))
             }
 
-            fn as_dyn_eq(&self) -> &dyn ::bevy_impulse::utils::DynEq {
+            fn as_dyn_eq(&self) -> &dyn ::crossflow::utils::DynEq {
                 self
             }
 

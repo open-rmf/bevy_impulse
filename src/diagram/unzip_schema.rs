@@ -37,7 +37,7 @@ use super::{
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "name_phone_address",

@@ -44,7 +44,7 @@ use super::{
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "fork_clone",
@@ -156,7 +156,7 @@ impl BuildDiagramOperation for BufferSchema {
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "fork_clone",
@@ -254,7 +254,7 @@ where
 ///
 /// # Examples
 /// ```
-/// # bevy_impulse::Diagram::from_json_str(r#"
+/// # crossflow::Diagram::from_json_str(r#"
 /// {
 ///     "version": "0.1.0",
 ///     "start": "num_output",

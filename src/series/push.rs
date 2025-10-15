@@ -20,7 +20,7 @@ use std::borrow::Cow;
 use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput, NamedValue,
+    add_lifecycle_dependency, Collection, Executable, Input, InputBundle, ManageInput, NamedValue,
     OperationRequest, OperationResult, OperationSetup, OrBroken, Storage,
 };
 
@@ -54,7 +54,7 @@ impl<T> Push<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Impulsive for Push<T> {
+impl<T: 'static + Send + Sync> Executable for Push<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         if !self.settings.is_stream {
             add_lifecycle_dependency(source, self.settings.target, world);

@@ -22,17 +22,17 @@ use std::future::Future;
 use crate::{
     async_execution::{spawn_task, task_cancel_sender},
     make_stream_buffers_from_world, ActiveTasksStorage, AsyncMap, BlockingMap, CallAsyncMapOnce,
-    CallBlockingMapOnce, Channel, ChannelQueue, Impulsive, Input, InputBundle, ManageInput,
+    CallBlockingMapOnce, Channel, ChannelQueue, Executable, Input, InputBundle, ManageInput,
     OperateTask, OperationRequest, OperationResult, OperationSetup, OrBroken, Sendish,
     SingleTargetStorage, StreamPack, UnusedStreams,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
-/// this supports FnOnce since it's used for impulse chains which are not
+/// this supports FnOnce since it's used for seriess which are not
 /// reusable, whereas [`crate::OperateBlockingMap`] is used in workflows which
 /// need to be reusable, so it can only support FnMut.
 #[derive(Bundle)]
-pub(crate) struct ImpulseBlockingMap<F, Request, Response, Streams>
+pub(crate) struct BlockingMapOnce<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -45,7 +45,7 @@ where
     _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
-impl<F, Request, Response, Streams> ImpulseBlockingMap<F, Request, Response, Streams>
+impl<F, Request, Response, Streams> BlockingMapOnce<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -66,7 +66,7 @@ struct BlockingMapOnceStorage<F> {
     f: F,
 }
 
-impl<F, Request, Response, Streams> Impulsive for ImpulseBlockingMap<F, Request, Response, Streams>
+impl<F, Request, Response, Streams> Executable for BlockingMapOnce<F, Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -116,7 +116,7 @@ where
             roster,
         )?;
         // Note: We do not need to emit a disposal for any unused streams since
-        // this is only used for impulses, not workflows.
+        // this is only used for series, not workflows.
 
         world
             .get_entity_mut(target)
@@ -127,10 +127,10 @@ where
 }
 
 /// The key difference between this and [`crate::OperateAsyncMap`] is that
-/// this supports FnOnce since it's used for impulse chains which are not
+/// this supports FnOnce since it's used for seriess which are not
 /// reusable, whereas [`crate::OperateAsyncMap`] is used in workflows which
 /// need to be reusable, so it can only support FnMut.
-pub(crate) struct ImpulseAsyncMap<F, Request, Task, Streams>
+pub(crate) struct AsyncMapOnce<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -142,7 +142,7 @@ where
     _ignore: std::marker::PhantomData<fn(Request, Task, Streams)>,
 }
 
-impl<F, Request, Task, Streams> ImpulseAsyncMap<F, Request, Task, Streams>
+impl<F, Request, Task, Streams> AsyncMapOnce<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -163,7 +163,7 @@ struct AsyncMapOnceStorage<F> {
     f: F,
 }
 
-impl<F, Request, Task, Streams> Impulsive for ImpulseAsyncMap<F, Request, Task, Streams>
+impl<F, Request, Task, Streams> Executable for AsyncMapOnce<F, Request, Task, Streams>
 where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Sendish,

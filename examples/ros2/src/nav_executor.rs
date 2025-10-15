@@ -17,7 +17,7 @@
 
 use ros2_workflow_examples::register_nav_catalog;
 use rclrs::*;
-use bevy_impulse_diagram_editor::basic_executor::{self, DiagramElementRegistry, Error};
+use crossflow_diagram_editor::basic_executor::{self, DiagramElementRegistry, Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Set up the critical rclrs components

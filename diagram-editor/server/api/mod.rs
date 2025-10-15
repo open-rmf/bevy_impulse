@@ -9,7 +9,7 @@ use axum::{
 };
 #[cfg(feature = "router")]
 use axum::{routing::get, Router};
-use bevy_impulse::DiagramElementRegistry;
+use crossflow::DiagramElementRegistry;
 use mime_guess::mime;
 
 #[derive(Default)]
@@ -76,7 +76,7 @@ mod tests {
         body::{self, Body},
         http::{header, Request, StatusCode},
     };
-    use bevy_impulse::NodeBuilderOptions;
+    use crossflow::NodeBuilderOptions;
     use mime_guess::mime;
     use tower::Service;
 

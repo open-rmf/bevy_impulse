@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_impulse_diagram_editor::basic_executor::{self, DiagramElementRegistry, Error};
+use crossflow_diagram_editor::basic_executor::{self, DiagramElementRegistry, Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut registry = DiagramElementRegistry::new();
