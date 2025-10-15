@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import type { EdgeChange } from '@xyflow/react';
 import { useId, useMemo } from 'react';
-import type { BufferEdge } from '../edges';
+import { type BufferEdge, BufferPullType } from '../edges';
 import { useNodeManager } from '../node-manager';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
@@ -54,6 +54,30 @@ export function BufferEdgeInputForm({
   edge,
   onChange,
 }: BufferEdgeInputFormProps) {
+  const labelId = useId();
+  const nodeManager = useNodeManager();
+  const targetNode = nodeManager.tryGetNode(edge.target);
+  const targetIsSection = targetNode?.type === 'section';
+  const registry = useRegistry();
+  const [templates, _setTemplates] = useTemplates();
+
+  const sectionBuffers = useMemo(() => {
+    if (!targetNode || targetNode.type !== 'section') {
+      return [];
+    }
+    if (typeof targetNode.data.op.builder === 'string') {
+      const sectionRegistration = registry.sections[targetNode.data.op.builder];
+      return sectionRegistration
+        ? Object.keys(sectionRegistration.metadata.buffers)
+        : [];
+    } else if (typeof targetNode.data.op.template === 'string') {
+      const template = templates[targetNode.data.op.template];
+      return template ? getTemplateBuffers(template) : [];
+    } else {
+      return [];
+    }
+  }, [targetNode, registry, templates]);
+
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
@@ -105,31 +129,6 @@ export function BufferEdgeInputForm({
       }
     }
   };
-
-  const labelId = useId();
-
-  const nodeManager = useNodeManager();
-  const targetNode = nodeManager.tryGetNode(edge.target);
-  const targetIsSection = targetNode?.type === 'section';
-  const registry = useRegistry();
-  const [templates, _setTemplates] = useTemplates();
-
-  const sectionBuffers = useMemo(() => {
-    if (!targetNode || targetNode.type !== 'section') {
-      return [];
-    }
-    if (typeof targetNode.data.op.builder === 'string') {
-      const sectionRegistration = registry.sections[targetNode.data.op.builder];
-      return sectionRegistration
-        ? Object.keys(sectionRegistration.metadata.buffers)
-        : [];
-    } else if (typeof targetNode.data.op.template === 'string') {
-      const template = templates[targetNode.data.op.template];
-      return template ? getTemplateBuffers(template) : [];
-    } else {
-      return [];
-    }
-  }, [targetNode, registry, templates]);
 
   return (
     <>
@@ -201,6 +200,35 @@ export function BufferEdgeInputForm({
             <TextField {...params} required label="Section Buffer" />
           )}
         />
+      )}
+      {nodeManager.getNode(edge.target).type === 'join' && (
+        <FormControl>
+          <InputLabel id={`${labelId}-pull-type`}>Pull Type</InputLabel>
+          <Select
+            labelId={labelId}
+            label="Pull Type"
+            value={edge.data.input.pull_type || BufferPullType.Pull}
+            onChange={(ev) => {
+              onChange?.({
+                type: 'replace',
+                id: edge.id,
+                item: {
+                  ...edge,
+                  data: {
+                    ...edge.data,
+                    input: {
+                      ...edge.data.input,
+                      pull_type: ev.target.value,
+                    },
+                  },
+                } as BufferEdge,
+              });
+            }}
+          >
+            <MenuItem value={BufferPullType.Pull}>Pull</MenuItem>
+            <MenuItem value={BufferPullType.Clone}>Clone</MenuItem>
+          </Select>
+        </FormControl>
       )}
     </>
   );

@@ -37,6 +37,11 @@ export type BuiltinTarget = 'terminate' | 'dispose' | 'cancel';
 export type TraceToggle = 'off' | 'on' | 'messages';
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
+ * via the `definition` "BufferIdentifier".
+ */
+export type BufferIdentifier = string | number;
+/**
+ * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "RetentionPolicy".
  */
 export type RetentionPolicy =
@@ -918,7 +923,20 @@ export interface SplitSchema {
  */
 export interface JoinSchema {
   buffers: BufferSelection;
+  /**
+   * List of the keys in the `buffers` dictionary whose value should be cloned
+   *  instead of removed from the buffer (pulled) when the join occurs. Cloning
+   *  the value will leave the buffer unchanged after the join operation takes
+   *  place.
+   */
+  clone?: BufferIdentifier[];
   next: NextOperation;
+  /**
+   * Whether or not to automatically serialize the inputs into a single JsonMessage.
+   *  This will only work if all input types are serializable, otherwise you will
+   *  get a [`DiagramError`][super::DiagramError].
+   */
+  serialize?: boolean;
   [k: string]: unknown;
 }
 /**
@@ -1038,7 +1056,6 @@ export interface TransformSchema {
 export interface ListenSchema {
   buffers: BufferSelection;
   next: NextOperation;
-  target_node?: NextOperation | null;
   [k: string]: unknown;
 }
 /**

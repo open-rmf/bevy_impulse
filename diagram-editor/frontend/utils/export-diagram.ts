@@ -1,5 +1,9 @@
 import equal from 'fast-deep-equal';
-import type { DiagramEditorEdge, StreamOutEdge } from '../edges';
+import {
+  BufferPullType,
+  type DiagramEditorEdge,
+  type StreamOutEdge,
+} from '../edges';
 import type { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
@@ -137,6 +141,15 @@ function syncBufferSelection(
       }
       bufferSelection[edge.data.input.key] = sourceNode.data.opId;
     }
+
+    if (targetOp.type === 'join') {
+      if (edge.data.input.pull_type === BufferPullType.Clone) {
+        if (!targetOp.clone) {
+          targetOp.clone = [];
+        }
+        targetOp.clone.push(sourceNode.data.opId);
+      }
+    }
   }
 }
 
@@ -168,7 +181,14 @@ function syncEdge(
         }
         break;
       }
-      case 'join':
+      case 'join': {
+        if (edge.type !== 'default') {
+          throw new Error('expected "default" edge');
+        }
+
+        sourceOp.next = nodeManager.getTargetNextOp(edge);
+        break;
+      }
       case 'serialized_join':
       case 'transform':
       case 'buffer_access':
@@ -302,18 +322,7 @@ function syncEdge(
   }
 }
 
-/**
- * Update the operation connections from the edges.
- *
- * @param root only used to update the `start` field, does not actually populate the operations.
- */
-function syncEdges(
-  registry: DiagramElementRegistry,
-  nodeManager: NodeManager,
-  root: SubOperations,
-  edges: DiagramEditorEdge[],
-): void {
-  // first clear all the connections
+function clearConnections(nodeManager: NodeManager, root: SubOperations) {
   root.start = { builtin: 'dispose' };
   for (const node of nodeManager.iterNodes()) {
     switch (node.type) {
@@ -337,7 +346,12 @@ function syncEdges(
         node.data.op.next = { builtin: 'dispose' };
         break;
       }
-      case 'join':
+      case 'join': {
+        node.data.op.next = { builtin: 'dispose' };
+        node.data.op.buffers = [];
+        delete node.data.op.clone;
+        break;
+      }
       case 'serialized_join':
       case 'listen':
       case 'buffer_access': {
@@ -380,6 +394,21 @@ function syncEdges(
       }
     }
   }
+}
+
+/**
+ * Update the operation connections from the edges.
+ *
+ * @param root only used to update the `start` field, does not actually populate the operations.
+ */
+function syncEdges(
+  registry: DiagramElementRegistry,
+  nodeManager: NodeManager,
+  root: SubOperations,
+  edges: DiagramEditorEdge[],
+): void {
+  // first clear all the connections
+  clearConnections(nodeManager, root);
 
   const validEdges = edges.filter((edge) => {
     // Filter out zombie stream edges that connects to a node without streams
