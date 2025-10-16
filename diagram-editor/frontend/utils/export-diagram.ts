@@ -143,7 +143,7 @@ function syncBufferSelection(
     }
 
     if (targetOp.type === 'join') {
-      if (edge.data.input.fetch_type === BufferFetchType.Clone) {
+      if (edge.data.input.fetchType === BufferFetchType.Clone) {
         if (!targetOp.clone) {
           targetOp.clone = [];
         }

@@ -13,17 +13,17 @@ export enum BufferFetchType {
 export type BufferKeyInputSlotData = {
   type: 'bufferKey';
   key: string;
-  fetch_type?: BufferFetchType;
+  fetchType?: BufferFetchType;
 };
 
 export type BufferSeqInputSlotData = {
   type: 'bufferSeq';
   seq: number;
-  fetch_type?: BufferFetchType;
+  fetchType?: BufferFetchType;
 };
 
 export type SectionBufferInputSlotData = {
   type: 'sectionBuffer';
   inputId: string;
-  fetch_type?: BufferFetchType;
+  fetchType?: BufferFetchType;
 };

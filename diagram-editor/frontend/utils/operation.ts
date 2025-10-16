@@ -1,4 +1,5 @@
 import {
+  BufferFetchType,
   createBufferEdge,
   createDefaultEdge,
   createForkResultErrEdge,
@@ -63,6 +64,20 @@ function createStreamOutEdges(
   return edges;
 }
 
+function getBufferFetchType(
+  node: OperationNode,
+  key: string | number,
+): BufferFetchType | null {
+  if (node.type !== 'join' || node.data.op.type !== 'join') {
+    return null;
+  }
+  if (node.data.op.clone && key in node.data.op.clone) {
+    return BufferFetchType.Clone;
+  } else {
+    return BufferFetchType.Pull;
+  }
+}
+
 function createBufferEdges(
   node: OperationNode,
   buffers: BufferSelection,
@@ -76,10 +91,12 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
+        const fetchType = getBufferFetchType(node, idx);
         edges.push(
           createBufferEdge(source, null, node.id, null, {
             type: 'bufferSeq',
             seq: idx,
+            ...(fetchType !== null ? { fetchType } : {}),
           }),
         );
       }
@@ -91,26 +108,15 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
+        const fetchType = getBufferFetchType(node, key);
         edges.push(
           createBufferEdge(source, null, node.id, null, {
             type: 'bufferKey',
             key,
+            ...(fetchType !== null ? { fetchType } : {}),
           }),
         );
       }
-    }
-  } else {
-    const source = nodeManager.getNodeFromNextOp(
-      node.data.namespace,
-      buffers,
-    )?.id;
-    if (source) {
-      edges.push(
-        createBufferEdge(source, null, node.id, null, {
-          type: 'bufferSeq',
-          seq: 0,
-        }),
-      );
     }
   }
 

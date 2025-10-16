@@ -207,7 +207,7 @@ export function BufferEdgeInputForm({
           <Select
             labelId={labelId}
             label="Fetch Type"
-            value={edge.data.input.fetch_type || BufferFetchType.Pull}
+            value={edge.data.input.fetchType || BufferFetchType.Pull}
             onChange={(ev) => {
               onChange?.({
                 type: 'replace',
@@ -218,7 +218,7 @@ export function BufferEdgeInputForm({
                     ...edge.data,
                     input: {
                       ...edge.data.input,
-                      fetch_type: ev.target.value,
+                      fetchType: ev.target.value,
                     },
                   },
                 } as BufferEdge,
