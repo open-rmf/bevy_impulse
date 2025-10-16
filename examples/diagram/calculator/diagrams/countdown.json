@@ -4,10 +4,26 @@
   "templates": {},
   "start": "06f8e6fc-6f2e-4bc6-9d11-04b7c3337ecf",
   "ops": {
-    "06f8e6fc-6f2e-4bc6-9d11-04b7c3337ecf": {
+    "6819eaee-36f0-4d68-9f98-9f56a66cee6a": {
+      "type": "fork_clone",
+      "next": [
+        "8b6f3104-f964-40ba-a49b-138225e5c4df",
+        "aeeba798-08b3-4d86-8ff5-dc174506700c"
+      ]
+    },
+    "8b6f3104-f964-40ba-a49b-138225e5c4df": {
       "type": "node",
-      "builder": "less_than",
-      "next": "9d14da2a-071b-46bd-9566-483c66f51699",
+      "builder": "print",
+      "next": {
+        "builtin": "dispose"
+      },
+      "config": "Subtracting one",
+      "display_text": "Print Subtraction"
+    },
+    "aeeba798-08b3-4d86-8ff5-dc174506700c": {
+      "type": "node",
+      "builder": "sub",
+      "next": "06f8e6fc-6f2e-4bc6-9d11-04b7c3337ecf",
       "config": 1
     },
     "9d14da2a-071b-46bd-9566-483c66f51699": {
@@ -17,26 +33,12 @@
         "builtin": "terminate"
       }
     },
-    "aeeba798-08b3-4d86-8ff5-dc174506700c": {
+    "06f8e6fc-6f2e-4bc6-9d11-04b7c3337ecf": {
       "type": "node",
-      "builder": "sub",
-      "next": "06f8e6fc-6f2e-4bc6-9d11-04b7c3337ecf",
-      "config": 1
-    },
-    "8b6f3104-f964-40ba-a49b-138225e5c4df": {
-      "type": "node",
-      "builder": "print",
-      "next": {
-        "builtin": "dispose"
-      },
-      "config": "Subtracting one"
-    },
-    "6819eaee-36f0-4d68-9f98-9f56a66cee6a": {
-      "type": "fork_clone",
-      "next": [
-        "8b6f3104-f964-40ba-a49b-138225e5c4df",
-        "aeeba798-08b3-4d86-8ff5-dc174506700c"
-      ]
+      "builder": "less_than",
+      "next": "9d14da2a-071b-46bd-9566-483c66f51699",
+      "config": 1,
+      "display_text": "is Less Than 1"
     }
   }
 }
