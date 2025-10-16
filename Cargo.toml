@@ -15,6 +15,16 @@ categories = [
   "game-development",
 ]
 
+# Exclude files related to the npm package management done by crossflow_diagram_editor,
+# and other miscellaneous config files.
+exclude = [
+  ".github/*",
+  "biome.json",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+]
+
 [workspace.dependencies]
 axum = { version = "0.8.4", default-features = false }
 bevy_app = "0.16"
