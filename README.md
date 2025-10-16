@@ -9,9 +9,15 @@
 >
 > That feature is kept separate for now because it requires additional non-Rust setup. It will be merged into `main` after dynamic message introspection is finished.
 
-# Reactive Programming for Bevy
+# Reactive Programming and Workflow Engine in Bevy
 
 This library provides sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS. In addition to supporting one-shot chains of async operations, it can support reusable workflows with parallel branches, synchronization, races, and cycles. These workflows can be hierarchical, so a workflow can be used as a building block by other workflows.
+
+This library can serve two different but related roles:
+* Implementing one or more complex async state machines inside of a Bevy application
+* General workflow execution
+
+If you are a bevy developer, then you may be interested in that first role, because crossflow is deeply integrated with bevy's ECS and integrates seamlessly into typical applications that are implemented with bevy. If you just want something that can execute a graphical description of a workflow, then you will be interested in that second role, in which case bevy is just an implementation detail which might or might not matter to you.
 
 ![sense-think-act workflow](assets/figures/sense-think-act_workflow.svg)
 
@@ -35,13 +41,22 @@ There are several different categories of problems that crossflow sets out to so
  * [Rust Book](https://doc.rust-lang.org/stable/book/)
  * [Install Rust](https://www.rust-lang.org/tools/install)
 
-# Compatibility
+# Middleware Support
 
-Crossflow may be supported across several releases of Bevy, although we only have one for the time being:
+Crossflow has out-of-the box support for several message-passing middlewares, and we intend to keep growing this list:
+* gRPC with protobuf messages (feature = `"grpc"`)
+* zenoh with protobuf or json messages (feature = `"zenoh"`)
+* ROS 2 via rclrs ([`ros2` branch](https://github.com/open-rmf/crossflow/tree/ros2), feature = `"ros2"`)
+
+Support for each of these middlewares is feature-gated so that the dependencies are not forced on users who do not need them. To activate all available middleware support at once, use the `maximal` feature.
+
+# Bevy Compatibility
+
+Crossflow may be supported across several releases of Bevy in the future, although we only have one for the time being:
 
 | bevy | crossflow |
 |------|--------------|
-|0.16  | 0.0.1        |
+|0.16  | 0.0.x        |
 
 The `main` branch currently targets bevy version 0.16 (crossflow 0.0.x). We
 will try to keep `main` up to date with the latest release of bevy, but you can
