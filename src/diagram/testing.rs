@@ -222,6 +222,7 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
             |builder, config: ComparisonConfig| {
                 let settings: ComparisonSettings = config.into();
                 builder.create_map_block(move |request: JsonMessage| {
+                    dbg!(&request);
                     compare(settings, request, |a: f64, b: f64| a < b)
                 })
             },
@@ -314,6 +315,7 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
             .with_examples_configs(mul_examples),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
+                dbg!((&req, config));
                 let input = match req {
                     JsonMessage::Array(array) => {
                         let mut iter = array
