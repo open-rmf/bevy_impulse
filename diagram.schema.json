@@ -308,19 +308,6 @@
           "properties": {
             "type": {
               "type": "string",
-              "const": "serialized_join"
-            }
-          },
-          "$ref": "#/$defs/SerializedJoinSchema",
-          "required": [
-            "type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
               "const": "transform"
             }
           },
@@ -457,7 +444,7 @@
       ]
     },
     "JoinSchema": {
-      "description": "Wait for exactly one item to be available in each buffer listed in\n `buffers`, then join each of those items into a single output message\n that gets sent to `next`.\n\n If the `next` operation is not a `node` type (e.g. `fork_clone`) then\n you must specify a `target_node` so that the diagram knows what data\n structure to join the values into.\n\n The output message type must be registered as joinable at compile time.\n If you want to join into a dynamic data structure then you should use\n [`DiagramOperation::SerializedJoin`] instead.\n\n # Examples\n ```\n # crossflow::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"begin_measuring\",\n     \"ops\": {\n         \"begin_measuring\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"localize\", \"imu\"]\n         },\n         \"localize\": {\n             \"type\": \"node\",\n             \"builder\": \"localize\",\n             \"next\": \"estimated_position\"\n         },\n         \"imu\": {\n             \"type\": \"node\",\n             \"builder\": \"imu\",\n             \"config\": \"velocity\",\n             \"next\": \"estimated_velocity\"\n         },\n         \"estimated_position\": { \"type\": \"buffer\" },\n         \"estimated_velocity\": { \"type\": \"buffer\" },\n         \"gather_state\": {\n             \"type\": \"join\",\n             \"buffers\": {\n                 \"position\": \"estimate_position\",\n                 \"velocity\": \"estimate_velocity\"\n             },\n             \"next\": \"report_state\"\n         },\n         \"report_state\": {\n             \"type\": \"node\",\n             \"builder\": \"publish_state\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+      "description": "Wait for exactly one item to be available in each buffer listed in\n `buffers`, then join each of those items into a single output message\n that gets sent to `next`.\n\n If the `next` operation is not a `node` type (e.g. `fork_clone`) then\n you must specify a `target_node` so that the diagram knows what data\n structure to join the values into.\n\n # Examples\n ```\n # crossflow::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"begin_measuring\",\n     \"ops\": {\n         \"begin_measuring\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"localize\", \"imu\"]\n         },\n         \"localize\": {\n             \"type\": \"node\",\n             \"builder\": \"localize\",\n             \"next\": \"estimated_position\"\n         },\n         \"imu\": {\n             \"type\": \"node\",\n             \"builder\": \"imu\",\n             \"config\": \"velocity\",\n             \"next\": \"estimated_velocity\"\n         },\n         \"estimated_position\": { \"type\": \"buffer\" },\n         \"estimated_velocity\": { \"type\": \"buffer\" },\n         \"gather_state\": {\n             \"type\": \"join\",\n             \"buffers\": {\n                 \"position\": \"estimate_position\",\n                 \"velocity\": \"estimate_velocity\"\n             },\n             \"next\": \"report_state\"\n         },\n         \"report_state\": {\n             \"type\": \"node\",\n             \"builder\": \"publish_state\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
       "type": "object",
       "properties": {
         "buffers": {
@@ -772,23 +759,6 @@
         "ops"
       ]
     },
-    "SerializedJoinSchema": {
-      "description": "Same as [`DiagramOperation::Join`] but all input messages must be\n serializable, and the output message will always be [`serde_json::Value`].\n\n If you use an array for `buffers` then the output message will be a\n [`serde_json::Value::Array`]. If you use a map for `buffers` then the\n output message will be a [`serde_json::Value::Object`].\n\n Unlike [`DiagramOperation::Join`], the `target_node` property does not\n exist for this schema.",
-      "type": "object",
-      "properties": {
-        "buffers": {
-          "description": "Map of buffer keys and buffers.",
-          "$ref": "#/$defs/BufferSelection"
-        },
-        "next": {
-          "$ref": "#/$defs/NextOperation"
-        }
-      },
-      "required": [
-        "next",
-        "buffers"
-      ]
-    },
     "SplitSchema": {
       "description": "If the input message is a list-like or map-like object, split it into\n multiple output messages.\n\n Note that the type of output message from the split depends on how the\n input message implements the [`Splittable`][1] trait. In many cases this\n will be a tuple of `(key, value)`.\n\n There are three ways to specify where the split output messages should\n go, and all can be used at the same time:\n * `sequential` - For array-like collections, send the \"first\" element of\n   the collection to the first operation listed in the `sequential` array.\n   The \"second\" element of the collection goes to the second operation\n   listed in the `sequential` array. And so on for all elements in the\n   collection. If one of the elements in the collection is mentioned in\n   the `keyed` set, then the sequence will pass over it as if the element\n   does not exist at all.\n * `keyed` - For map-like collections, send the split element associated\n   with the specified key to its associated output.\n * `remaining` - Any elements that are were not captured by `sequential`\n   or by `keyed` will be sent to this.\n\n [1]: crate::Splittable\n\n # Examples\n\n Suppose I am an animal rescuer sorting through a new collection of\n animals that need recuing. My home has space for three exotic animals\n plus any number of dogs and cats.\n\n I have a custom `SpeciesCollection` data structure that implements\n [`Splittable`][1] by allowing you to key on the type of animal.\n\n In the workflow below, we send all cats and dogs to `home`, and we also\n send the first three non-dog and non-cat species to `home`. All\n remaining animals go to the zoo.\n\n ```\n # crossflow::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"select_animals\",\n     \"ops\": {\n         \"select_animals\": {\n             \"type\": \"split\",\n             \"sequential\": [\n                 \"home\",\n                 \"home\",\n                 \"home\"\n             ],\n             \"keyed\": {\n                 \"cat\": \"home\",\n                 \"dog\": \"home\"\n             },\n             \"remaining\": \"zoo\"\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n If we input `[\"frog\", \"cat\", \"bear\", \"beaver\", \"dog\", \"rabbit\", \"dog\", \"monkey\"]`\n then `frog`, `bear`, and `beaver` will be sent to `home` since those are\n the first three animals that are not `dog` or `cat`, and we will also\n send one `cat` and two `dog` home. `rabbit` and `monkey` will be sent to the zoo.",
       "type": "object",
@@ -819,14 +789,7 @@
         "sequential": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/NextOperation"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/$defs/NextOperation"
           }
         },
         "trace": {

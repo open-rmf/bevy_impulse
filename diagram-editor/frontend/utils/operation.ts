@@ -154,7 +154,6 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
         }
         case 'buffer_access':
         case 'join':
-        case 'serialized_join':
         case 'listen': {
           edges.push(...createBufferEdges(node, op.buffers, nodeManager));
 

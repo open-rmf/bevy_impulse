@@ -44,7 +44,7 @@ use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
 use fork_clone_schema::{DynForkClone, ForkCloneSchema, RegisterClone};
 use fork_result_schema::{DynForkResult, ForkResultSchema};
 pub use join_schema::JoinOutput;
-use join_schema::{JoinSchema, SerializedJoinSchema};
+use join_schema::JoinSchema;
 pub use node_schema::NodeSchema;
 pub use operation_ref::*;
 pub use registration::*;
@@ -297,7 +297,6 @@ pub enum DiagramOperation {
     ForkResult(ForkResultSchema),
     Split(SplitSchema),
     Join(JoinSchema),
-    SerializedJoin(SerializedJoinSchema),
     Transform(TransformSchema),
     Buffer(BufferSchema),
     BufferAccess(BufferAccessSchema),
@@ -320,7 +319,6 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Node(op) => op.build_diagram_operation(id, ctx),
             Self::Scope(op) => op.build_diagram_operation(id, ctx),
             Self::Section(op) => op.build_diagram_operation(id, ctx),
-            Self::SerializedJoin(op) => op.build_diagram_operation(id, ctx),
             Self::Split(op) => op.build_diagram_operation(id, ctx),
             Self::StreamOut(op) => op.build_diagram_operation(id, ctx),
             Self::Transform(op) => op.build_diagram_operation(id, ctx),

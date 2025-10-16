@@ -33,10 +33,6 @@ use crate::{default_as_false, is_default, is_false, BufferIdentifier};
 /// you must specify a `target_node` so that the diagram knows what data
 /// structure to join the values into.
 ///
-/// The output message type must be registered as joinable at compile time.
-/// If you want to join into a dynamic data structure then you should use
-/// [`DiagramOperation::SerializedJoin`] instead.
-///
 /// # Examples
 /// ```
 /// # crossflow::Diagram::from_json_str(r#"
@@ -146,46 +142,6 @@ impl BuildDiagramOperation for JoinSchema {
                 .join(&target_type, &buffer_map, ctx.builder)?;
             ctx.add_output_into_target(&self.next, output);
         }
-        Ok(BuildStatus::Finished)
-    }
-}
-
-/// Same as [`DiagramOperation::Join`] but all input messages must be
-/// serializable, and the output message will always be [`serde_json::Value`].
-///
-/// If you use an array for `buffers` then the output message will be a
-/// [`serde_json::Value::Array`]. If you use a map for `buffers` then the
-/// output message will be a [`serde_json::Value::Object`].
-///
-/// Unlike [`DiagramOperation::Join`], the `target_node` property does not
-/// exist for this schema.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct SerializedJoinSchema {
-    pub(super) next: NextOperation,
-
-    /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferSelection,
-}
-
-impl BuildDiagramOperation for SerializedJoinSchema {
-    fn build_diagram_operation(
-        &self,
-        _: &OperationName,
-        ctx: &mut DiagramContext,
-    ) -> Result<BuildStatus, DiagramErrorCode> {
-        if self.buffers.is_empty() {
-            return Err(DiagramErrorCode::EmptyJoin);
-        }
-
-        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
-            Ok(buffer_map) => buffer_map,
-            Err(reason) => return Ok(BuildStatus::defer(reason)),
-        };
-
-        let output = ctx.builder.try_join::<JsonMessage>(&buffer_map)?.output();
-        ctx.add_output_into_target(&self.next, output.into());
-
         Ok(BuildStatus::Finished)
     }
 }
@@ -513,113 +469,6 @@ mod tests {
     }
 
     #[test]
-    fn test_serialized_join() {
-        let mut fixture = DiagramTestFixture::new();
-        register_join_nodes(&mut fixture.registry);
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "fork_clone",
-            "ops": {
-                "fork_clone": {
-                    "type": "fork_clone",
-                    "next": ["foo", "bar"],
-                },
-                "foo": {
-                    "type": "node",
-                    "builder": "foo",
-                    "next": "foo_buffer",
-                },
-                "foo_buffer": {
-                    "type": "buffer",
-                    "serialize": true,
-                },
-                "bar": {
-                    "type": "node",
-                    "builder": "bar",
-                    "next": "bar_buffer",
-                },
-                "bar_buffer": {
-                    "type": "buffer",
-                    "serialize": true,
-                },
-                "serialized_join": {
-                    "type": "serialized_join",
-                    "buffers": {
-                        "foo": "foo_buffer",
-                        "bar": "bar_buffer",
-                    },
-                    "next": { "builtin": "terminate" },
-                },
-            }
-        }))
-        .unwrap();
-
-        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
-        assert!(fixture.context.no_unhandled_errors());
-        assert_eq!(result["foo"], "foo");
-        assert_eq!(result["bar"], "bar");
-    }
-
-    #[test]
-    fn test_serialized_join_with_unserialized_buffers() {
-        let mut fixture = DiagramTestFixture::new();
-        register_join_nodes(&mut fixture.registry);
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "fork_clone",
-            "ops": {
-                "fork_clone": {
-                    "type": "fork_clone",
-                    "next": ["create_foobar_1", "create_foobar_2"],
-                },
-                "create_foobar_1": {
-                    "type": "node",
-                    "builder": "create_foobar",
-                    "config": {
-                        "foo": "foo_1",
-                        "bar": "bar_1",
-                    },
-                    "next": "foobar_buffer_1",
-                },
-                "create_foobar_2": {
-                    "type": "node",
-                    "builder": "create_foobar",
-                    "config": {
-                        "foo": "foo_2",
-                        "bar": "bar_2",
-                    },
-                    "next": "foobar_buffer_2",
-                },
-                "foobar_buffer_1": {
-                    "type": "buffer",
-                },
-                "foobar_buffer_2": {
-                    "type": "buffer",
-                },
-                "serialized_join": {
-                    "type": "serialized_join",
-                    "buffers": {
-                        "foobar_1": "foobar_buffer_1",
-                        "foobar_2": "foobar_buffer_2",
-                    },
-                    "next": { "builtin": "terminate" },
-                },
-            }
-        }))
-        .unwrap();
-
-        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
-        assert!(fixture.context.no_unhandled_errors());
-        let object = result.as_object().unwrap();
-        assert_eq!(object["foobar_1"].as_object().unwrap()["foo"], "foo_1");
-        assert_eq!(object["foobar_1"].as_object().unwrap()["bar"], "bar_1");
-        assert_eq!(object["foobar_2"].as_object().unwrap()["foo"], "foo_2");
-        assert_eq!(object["foobar_2"].as_object().unwrap()["bar"], "bar_2");
-    }
-
-    #[test]
     fn test_diagram_join_by_clone() {
         let mut fixture = DiagramTestFixture::new();
         fixture
@@ -707,7 +556,7 @@ mod tests {
             "ops": {
                 "failure_split": {
                     "type": "split",
-                    "sequential": [ null, "x10" ]
+                    "sequential": [ { "builtin": "dispose" }, "x10" ]
                 },
                 "evaluate": {
                     "type": "node",

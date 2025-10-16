@@ -155,15 +155,8 @@ describe('validate edges', () => {
       { type: 'join', buffers: [], next: { builtin: 'dispose' } },
       'test_op_join',
     );
-    const serializedJoinNode = createOperationNode(
-      ROOT_NAMESPACE,
-      undefined,
-      { x: 0, y: 0 },
-      { type: 'serialized_join', buffers: [], next: { builtin: 'dispose' } },
-      'test_op_serialized_join',
-    );
 
-    for (const targetNode of [joinNode, serializedJoinNode]) {
+    for (const targetNode of [joinNode]) {
       {
         const validEdges = getValidEdgeTypes(nodeNode, null, targetNode, null);
         expect(validEdges.length).toBe(0);

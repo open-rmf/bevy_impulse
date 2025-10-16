@@ -58,8 +58,7 @@ function getBufferSelection(targetOp: DiagramOperation): BufferSelection {
   switch (targetOp.type) {
     case 'buffer_access':
     case 'listen':
-    case 'join':
-    case 'serialized_join': {
+    case 'join': {
       return targetOp.buffers;
     }
     default: {
@@ -75,8 +74,7 @@ function setBufferSelection(
   switch (targetOp.type) {
     case 'buffer_access':
     case 'listen':
-    case 'join':
-    case 'serialized_join': {
+    case 'join': {
       targetOp.buffers = bufferSelection;
       break;
     }
@@ -198,7 +196,6 @@ function syncEdge(
         break;
       }
       case 'join':
-      case 'serialized_join':
       case 'transform':
       case 'buffer_access':
       case 'listen': {
@@ -360,7 +357,6 @@ function clearConnections(nodeManager: NodeManager, root: SubOperations) {
         delete node.data.op.clone;
         break;
       }
-      case 'serialized_join':
       case 'listen':
       case 'buffer_access': {
         node.data.op.next = { builtin: 'dispose' };

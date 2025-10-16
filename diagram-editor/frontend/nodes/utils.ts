@@ -28,7 +28,6 @@ const OPERATION_NODE_TYPES = Object.keys({
   node: null,
   scope: null,
   section: null,
-  serialized_join: null,
   split: null,
   stream_out: null,
   transform: null,
