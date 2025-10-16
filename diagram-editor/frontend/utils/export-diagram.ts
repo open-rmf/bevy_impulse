@@ -1,9 +1,6 @@
 import equal from 'fast-deep-equal';
 import {
   BufferFetchType,
-  BufferKeyInputSlotData,
-  BufferSeqInputSlotData,
-  SectionBufferInputSlotData,
   type DiagramEditorEdge,
   type StreamOutEdge,
 } from '../edges';
@@ -161,6 +158,17 @@ function syncBufferSelection(
   }
 }
 
+function setSequentialKey(
+  sequences: NextOperation[],
+  idx: number,
+  value: NextOperation,
+) {
+  while (sequences.length <= idx) {
+    sequences.push({ builtin: 'dispose' });
+  }
+  sequences[idx] = value;
+}
+
 /**
  * Update a node's data with the edge, this updates fields like `next` and `buffer` to be
  * in sync with the edge data.
@@ -263,9 +271,8 @@ function syncEdge(
             if (!sourceOp.sequential) {
               sourceOp.sequential = [];
             }
-            // this works because js allows non-sequential arrays
             const next = nodeManager.getTargetNextOp(edge);
-            sourceOp.sequential[edge.data.output.seq] = next;
+            setSequentialKey(sourceOp.sequential, edge.data.output.seq, next);
             break;
           }
           case 'splitRemaining': {

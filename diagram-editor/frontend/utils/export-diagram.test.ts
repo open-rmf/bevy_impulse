@@ -9,12 +9,12 @@ import {
   type DiagramEditorNode,
   START_ID,
 } from '../nodes';
+import type { DiagramElementRegistry } from '../types/api';
 import { exportDiagram, exportTemplate } from './export-diagram';
 import { loadDiagramJson } from './load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import testDiagram from './test-data/test-diagram.json';
 import testDiagramScope from './test-data/test-diagram-scope.json';
-import type { DiagramElementRegistry } from '../types/api';
 
 const stubRegistry: DiagramElementRegistry = {
   messages: {},
