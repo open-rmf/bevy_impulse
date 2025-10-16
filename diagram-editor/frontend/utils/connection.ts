@@ -35,7 +35,6 @@ const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   sectionInput: ['default'],
   sectionOutput: [],
   sectionBuffer: ['buffer'],
-  serialized_join: ['default'],
   split: ['splitKey', 'splitSeq', 'splitRemaining'],
   start: ['default'],
   stream_out: [],
@@ -57,7 +56,6 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   sectionInput: [],
   sectionOutput: [EdgeCategory.Data],
   sectionBuffer: [],
-  serialized_join: [EdgeCategory.Buffer],
   split: [EdgeCategory.Data],
   start: [],
   stream_out: [EdgeCategory.Data],
@@ -173,7 +171,6 @@ function getOutputCardinality(
     case 'node':
     case 'buffer_access':
     case 'join':
-    case 'serialized_join':
     case 'listen':
     case 'scope':
     case 'stream_out':

@@ -14,7 +14,6 @@ import SectionNodeComp, {
   type SectionInterfaceNode,
   SectionOutputNodeComp,
 } from './section-node';
-import SerializedJoinNodeComp from './serialized-join-node';
 import SplitNodeComp from './split-node';
 import StartNodeComp from './start-node';
 import StreamOutNodeComp from './stream-out-node';
@@ -52,7 +51,6 @@ export const NODE_TYPES = {
   fork_result: ForkResultNodeComp,
   split: SplitNodeComp,
   join: JoinNodeComp,
-  serialized_join: SerializedJoinNodeComp,
   transform: TransformNodeComp,
   buffer: BufferNodeComp,
   buffer_access: BufferAccessNodeComp,

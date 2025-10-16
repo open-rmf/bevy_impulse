@@ -87,7 +87,10 @@ function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
 
   return (
     <Dialog
-      onClose={onClose}
+      onClose={() => {
+        onClose();
+        setCopiedShareLink(false);
+      }}
       open={open}
       fullWidth
       maxWidth="md"

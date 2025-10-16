@@ -61,8 +61,6 @@ export function JoinIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="arrow_and_edge" />;
 }
 
-export const SerializedJoinIcon = JoinIcon;
-
 export function StreamOutIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="notes" />;
 }
@@ -107,8 +105,6 @@ export function getIcon(op: DiagramOperation): React.ComponentType {
       return SplitIcon;
     case 'join':
       return JoinIcon;
-    case 'serialized_join':
-      return SerializedJoinIcon;
     case 'transform':
       return TransformIcon;
     case 'buffer':

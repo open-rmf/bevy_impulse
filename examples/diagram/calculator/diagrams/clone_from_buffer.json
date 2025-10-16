@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "initial_split",
+  "ops": {
+    "x10-buffer": {
+      "type": "buffer"
+    },
+    "x100-buffer": {
+      "type": "buffer"
+    },
+    "initial_split": {
+      "type": "split",
+      "sequential": [
+        "x100",
+        "x10"
+      ]
+    },
+    "x10": {
+      "type": "node",
+      "builder": "mul",
+      "next": "x10-buffer",
+      "config": 10,
+      "display_text": "x10"
+    },
+    "join": {
+      "type": "join",
+      "buffers": [
+        "x100-buffer",
+        "x10-buffer"
+      ],
+      "next": "evaluate",
+      "clone": [
+        0
+      ]
+    },
+    "x100": {
+      "type": "node",
+      "builder": "mul",
+      "next": "x100-buffer",
+      "config": 100,
+      "display_text": "x100"
+    },
+    "fork_result": {
+      "type": "fork_result",
+      "err": "failure_split",
+      "ok": {
+        "builtin": "terminate"
+      }
+    },
+    "evaluate": {
+      "type": "node",
+      "builder": "less_than",
+      "next": "fork_result"
+    },
+    "failure_split": {
+      "type": "split",
+      "sequential": [
+        { "builtin": "dispose" },
+        "x10"
+      ]
+    }
+  }
+}

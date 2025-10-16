@@ -18,7 +18,7 @@ import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
 export type { BufferEdge } from './buffer-edge';
 export * from './create-edge';
-export type * from './input-slots';
+export * from './input-slots';
 export type { SectionEdge } from './section-edge';
 export type { SplitKeyEdge } from './split-key-edge';
 export type { SplitRemainingEdge } from './split-remaining-edge';

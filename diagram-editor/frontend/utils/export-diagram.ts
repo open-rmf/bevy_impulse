@@ -1,5 +1,9 @@
 import equal from 'fast-deep-equal';
-import type { DiagramEditorEdge, StreamOutEdge } from '../edges';
+import {
+  BufferFetchType,
+  type DiagramEditorEdge,
+  type StreamOutEdge,
+} from '../edges';
 import type { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
@@ -54,8 +58,7 @@ function getBufferSelection(targetOp: DiagramOperation): BufferSelection {
   switch (targetOp.type) {
     case 'buffer_access':
     case 'listen':
-    case 'join':
-    case 'serialized_join': {
+    case 'join': {
       return targetOp.buffers;
     }
     default: {
@@ -71,8 +74,7 @@ function setBufferSelection(
   switch (targetOp.type) {
     case 'buffer_access':
     case 'listen':
-    case 'join':
-    case 'serialized_join': {
+    case 'join': {
       targetOp.buffers = bufferSelection;
       break;
     }
@@ -137,7 +139,32 @@ function syncBufferSelection(
       }
       bufferSelection[edge.data.input.key] = sourceNode.data.opId;
     }
+
+    if (targetOp.type === 'join') {
+      if (edge.data.input.fetchType === BufferFetchType.Clone) {
+        if (!targetOp.clone) {
+          targetOp.clone = [];
+        }
+        if (edge.data.input?.type === 'bufferSeq') {
+          targetOp.clone.push(edge.data.input.seq);
+        }
+        if (edge.data.input?.type === 'bufferKey') {
+          targetOp.clone.push(edge.data.input.key);
+        }
+      }
+    }
   }
+}
+
+function setSequentialKey(
+  sequences: NextOperation[],
+  idx: number,
+  value: NextOperation,
+) {
+  while (sequences.length <= idx) {
+    sequences.push({ builtin: 'dispose' });
+  }
+  sequences[idx] = value;
 }
 
 /**
@@ -169,7 +196,6 @@ function syncEdge(
         break;
       }
       case 'join':
-      case 'serialized_join':
       case 'transform':
       case 'buffer_access':
       case 'listen': {
@@ -242,9 +268,8 @@ function syncEdge(
             if (!sourceOp.sequential) {
               sourceOp.sequential = [];
             }
-            // this works because js allows non-sequential arrays
-            sourceOp.sequential[edge.data.output.seq] =
-              nodeManager.getTargetNextOp(edge);
+            const next = nodeManager.getTargetNextOp(edge);
+            setSequentialKey(sourceOp.sequential, edge.data.output.seq, next);
             break;
           }
           case 'splitRemaining': {
@@ -302,18 +327,7 @@ function syncEdge(
   }
 }
 
-/**
- * Update the operation connections from the edges.
- *
- * @param root only used to update the `start` field, does not actually populate the operations.
- */
-function syncEdges(
-  registry: DiagramElementRegistry,
-  nodeManager: NodeManager,
-  root: SubOperations,
-  edges: DiagramEditorEdge[],
-): void {
-  // first clear all the connections
+function clearConnections(nodeManager: NodeManager, root: SubOperations) {
   root.start = { builtin: 'dispose' };
   for (const node of nodeManager.iterNodes()) {
     switch (node.type) {
@@ -337,8 +351,12 @@ function syncEdges(
         node.data.op.next = { builtin: 'dispose' };
         break;
       }
-      case 'join':
-      case 'serialized_join':
+      case 'join': {
+        node.data.op.next = { builtin: 'dispose' };
+        node.data.op.buffers = [];
+        delete node.data.op.clone;
+        break;
+      }
       case 'listen':
       case 'buffer_access': {
         node.data.op.next = { builtin: 'dispose' };
@@ -380,6 +398,21 @@ function syncEdges(
       }
     }
   }
+}
+
+/**
+ * Update the operation connections from the edges.
+ *
+ * @param root only used to update the `start` field, does not actually populate the operations.
+ */
+function syncEdges(
+  registry: DiagramElementRegistry,
+  nodeManager: NodeManager,
+  root: SubOperations,
+  edges: DiagramEditorEdge[],
+): void {
+  // first clear all the connections
+  clearConnections(nodeManager, root);
 
   const validEdges = edges.filter((edge) => {
     // Filter out zombie stream edges that connects to a node without streams

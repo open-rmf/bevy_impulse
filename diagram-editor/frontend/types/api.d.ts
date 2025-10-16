@@ -37,6 +37,11 @@ export type BuiltinTarget = 'terminate' | 'dispose' | 'cancel';
 export type TraceToggle = 'off' | 'on' | 'messages';
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
+ * via the `definition` "BufferIdentifier".
+ */
+export type BufferIdentifier = string | number;
+/**
+ * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "RetentionPolicy".
  */
 export type RetentionPolicy =
@@ -111,10 +116,6 @@ export type DiagramOperation =
     })
   | (JoinSchema & {
       type: 'join';
-      [k: string]: unknown;
-    })
-  | (SerializedJoinSchema & {
-      type: 'serialized_join';
       [k: string]: unknown;
     })
   | (TransformSchema & {
@@ -866,10 +867,6 @@ export interface SplitSchema {
  *  you must specify a `target_node` so that the diagram knows what data
  *  structure to join the values into.
  *
- *  The output message type must be registered as joinable at compile time.
- *  If you want to join into a dynamic data structure then you should use
- *  [`DiagramOperation::SerializedJoin`] instead.
- *
  *  # Examples
  *  ```
  *  # crossflow::Diagram::from_json_str(r#"
@@ -918,26 +915,20 @@ export interface SplitSchema {
  */
 export interface JoinSchema {
   buffers: BufferSelection;
+  /**
+   * List of the keys in the `buffers` dictionary whose value should be cloned
+   *  instead of removed from the buffer (pulled) when the join occurs. Cloning
+   *  the value will leave the buffer unchanged after the join operation takes
+   *  place.
+   */
+  clone?: BufferIdentifier[];
   next: NextOperation;
-  [k: string]: unknown;
-}
-/**
- * Same as [`DiagramOperation::Join`] but all input messages must be
- *  serializable, and the output message will always be [`serde_json::Value`].
- *
- *  If you use an array for `buffers` then the output message will be a
- *  [`serde_json::Value::Array`]. If you use a map for `buffers` then the
- *  output message will be a [`serde_json::Value::Object`].
- *
- *  Unlike [`DiagramOperation::Join`], the `target_node` property does not
- *  exist for this schema.
- *
- * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
- * via the `definition` "SerializedJoinSchema".
- */
-export interface SerializedJoinSchema {
-  buffers: BufferSelection;
-  next: NextOperation;
+  /**
+   * Whether or not to automatically serialize the inputs into a single JsonMessage.
+   *  This will only work if all input types are serializable, otherwise you will
+   *  get a [`DiagramError`][super::DiagramError].
+   */
+  serialize?: boolean;
   [k: string]: unknown;
 }
 /**
@@ -1038,7 +1029,6 @@ export interface TransformSchema {
 export interface ListenSchema {
   buffers: BufferSelection;
   next: NextOperation;
-  target_node?: NextOperation | null;
   [k: string]: unknown;
 }
 /**

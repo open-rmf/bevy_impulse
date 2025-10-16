@@ -2,10 +2,11 @@ use std::error::Error;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Number, Value};
 
 use crate::{
-    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
-    StreamPack,
+    testing::TestingContext, Builder, ConfigExample, JsonMessage, RequestExt,
+    RunCommandsOnWorldExt, Service, StreamPack,
 };
 
 pub use crate::testing::FlushConditions;
@@ -184,11 +185,46 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         builder.create_map_block(move |a: i64| a + config)
     });
 
+    let less_than_description = "Compares for a less-than relationship, \
+        returning a Result<Msg> based on the evaluation. Inputs can be an \
+        array of numbers or a single number value. The exact behavior will \
+        depend on the config (see examples).";
+
+    let less_than_examples = [
+        ConfigExample::new(
+            "Verify that every element in the input array is less than the next one.",
+            ComparisonConfig::None,
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than OR EQUAL to the next one.",
+            ComparisonConfig::OrEqual(OrEqualTag::OrEqual),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than 10.",
+            ComparisonConfig::ComparedTo(10.0),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than or \
+            equal to 10.",
+            ComparisonConfig::Settings(ComparisonSettings {
+                compared_to: Some(10.0),
+                or_equal: true,
+            }),
+        ),
+    ];
+
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("less_than"),
-            |builder, config: u64| {
-                builder.create_map_block(move |a: u64| if a < config { Ok(a) } else { Err(a) })
+            NodeBuilderOptions::new("less_than")
+                .with_default_display_text("Less Than")
+                .with_description(less_than_description)
+                .with_examples_configs(less_than_examples),
+            |builder, config: ComparisonConfig| {
+                let settings: ComparisonSettings = config.into();
+                builder.create_map_block(move |request: JsonMessage| {
+                    dbg!(&request);
+                    compare(settings, request, |a: f64, b: f64| a < b)
+                })
             },
         )
         .with_result();
@@ -220,5 +256,255 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
             NodeBuilderOptions::new("opaque_response"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
         );
+
+    let add_description = "Add together any set of numbers passed as input and \
+        then add the value in the config. If only one number is passed in as \
+        input, it will be added to the value set in the config.";
+    let add_examples = [
+        ConfigExample::new(
+            "Simply sum the set of numbers passed as input.",
+            json!(null),
+        ),
+        ConfigExample::new(
+            "Sum the set of numbers passed as input, and then add 5.",
+            json!(5.0),
+        ),
+    ];
+
+    registry.register_node_builder(
+        NodeBuilderOptions::new("add")
+            .with_default_display_text("Add")
+            .with_description(add_description)
+            .with_examples_configs(add_examples),
+        |builder, config: Option<f64>| {
+            builder.create_map_block(move |req: JsonMessage| {
+                let input = match req {
+                    JsonMessage::Array(array) => {
+                        let mut sum: f64 = 0.0;
+                        for item in array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64)
+                        {
+                            sum += item;
+                        }
+                        sum
+                    }
+                    JsonMessage::Number(number) => number.as_f64().unwrap_or(0.0),
+                    _ => 0.0,
+                };
+
+                input + config.unwrap_or(0.0)
+            })
+        },
+    );
+
+    let mul_description = "Multiply some numbers. If an array of numbers is \
+        passed as input then all the numbers will be multiplied together. If \
+        a number is set in the config, that will also be multipled into the \
+        output.";
+    let mul_examples = [
+        ConfigExample::new("Simply multiply the input numbers together.", json!(null)),
+        ConfigExample::new("Additionally multiple the output by 5.", json!(5.0)),
+    ];
+
+    registry.register_node_builder(
+        NodeBuilderOptions::new("mul")
+            .with_default_display_text("Multiply")
+            .with_description(mul_description)
+            .with_examples_configs(mul_examples),
+        |builder, config: Option<f64>| {
+            builder.create_map_block(move |req: JsonMessage| {
+                dbg!((&req, config));
+                let input = match req {
+                    JsonMessage::Array(array) => {
+                        let mut iter = array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64);
+                        let mut input = iter.next().unwrap_or(0.0);
+                        for item in iter {
+                            input *= item;
+                        }
+                        input
+                    }
+                    JsonMessage::Number(number) => number.as_f64().unwrap_or(0.0),
+                    _ => 0.0,
+                };
+
+                input * config.unwrap_or(1.0)
+            })
+        },
+    );
+
+    let greater_than_description = "Compares for a greater-than relationship, \
+        returning a Result<Msg> based on the evaluation. Inputs can be an \
+        array of numbers or a single number value. The exact behavior will \
+        depend on the config (see examples).";
+
+    let greater_than_examples = [
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than the next one.",
+            ComparisonConfig::None,
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than OR EQUAL to the next one.",
+            ComparisonConfig::OrEqual(OrEqualTag::OrEqual),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than 10.",
+            ComparisonConfig::ComparedTo(10.0),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than or \
+            equal to 10.",
+            ComparisonConfig::Settings(ComparisonSettings {
+                compared_to: Some(10.0),
+                or_equal: true,
+            }),
+        ),
+    ];
+
     registry
+        .register_node_builder(
+            NodeBuilderOptions::new("greater_than")
+                .with_default_display_text("Greater Than")
+                .with_description(greater_than_description)
+                .with_examples_configs(greater_than_examples),
+            |builder, config: ComparisonConfig| {
+                let settings: ComparisonSettings = config.into();
+                builder.create_map_block(move |request: JsonMessage| {
+                    compare(settings, request, |a: f64, b: f64| a > b)
+                })
+            },
+        )
+        .with_result();
+
+    registry
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum ComparisonConfig {
+    None,
+    OrEqual(OrEqualTag),
+    ComparedTo(f64),
+    Settings(ComparisonSettings),
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum OrEqualTag {
+    OrEqual,
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ComparisonSettings {
+    #[serde(default)]
+    compared_to: Option<f64>,
+    #[serde(default)]
+    or_equal: bool,
+}
+
+impl From<ComparisonConfig> for ComparisonSettings {
+    fn from(config: ComparisonConfig) -> Self {
+        let mut settings = ComparisonSettings::default();
+        match config {
+            ComparisonConfig::None => {}
+            ComparisonConfig::ComparedTo(value) => {
+                settings.compared_to = Some(value);
+            }
+            ComparisonConfig::OrEqual(_) => {
+                settings.or_equal = true;
+            }
+            ComparisonConfig::Settings(s) => {
+                settings = s;
+            }
+        }
+
+        settings
+    }
+}
+
+fn compare(
+    settings: ComparisonSettings,
+    request: JsonMessage,
+    comparison: fn(f64, f64) -> bool,
+) -> Result<JsonMessage, JsonMessage> {
+    let check = |lhs: f64, rhs: f64| -> bool {
+        if comparison(lhs, rhs) {
+            return true;
+        }
+
+        settings.or_equal && (lhs == rhs)
+    };
+
+    match &request {
+        JsonMessage::Array(array) => {
+            let mut at_least_one_comparison = false;
+
+            if let Some(compared_to) = settings.compared_to {
+                // Check that every item in the array compares favorably against
+                // the fixed value.
+                for value in array.iter() {
+                    let Some(value) = value.as_number().and_then(Number::as_f64) else {
+                        return Err(request);
+                    };
+
+                    if !check(value, compared_to) {
+                        return Err(request);
+                    }
+                }
+            } else {
+                // No fixed value to compare against, so check that the array is
+                // in the appropriate order.
+                let mut iter = array.iter();
+                let Some(mut previous) = iter
+                    .next()
+                    .and_then(Value::as_number)
+                    .and_then(Number::as_f64)
+                else {
+                    return Err(request);
+                };
+
+                for next in iter {
+                    at_least_one_comparison = true;
+                    let Some(next) = next.as_number().and_then(Number::as_f64) else {
+                        return Err(request);
+                    };
+
+                    if !check(previous, next) {
+                        return Err(request);
+                    }
+
+                    previous = next;
+                }
+            }
+
+            if !at_least_one_comparison {
+                return Err(request);
+            }
+            return Ok(request);
+        }
+        JsonMessage::Number(number) => {
+            let Some(compared_to) = settings.compared_to else {
+                return Err(request);
+            };
+
+            let Some(value) = number.as_f64() else {
+                return Err(request);
+            };
+
+            if !check(value, compared_to) {
+                return Err(request);
+            }
+
+            return Ok(request);
+        }
+        _ => {
+            return Err(request);
+        }
+    }
 }
