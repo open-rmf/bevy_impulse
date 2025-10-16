@@ -56,8 +56,8 @@ pub struct RunArgs {
     #[arg(help = "path to the diagram to run")]
     diagram: String,
 
-    #[arg(help = "json containing the request to the diagram")]
-    request: String,
+    #[arg(help = "json containing the request to the diagram. Defaults to null if not set.")]
+    request: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -72,7 +72,7 @@ pub fn headless(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), B
     let file = File::open(args.diagram).unwrap();
     let diagram = Diagram::from_reader(file)?;
 
-    let request = serde_json::Value::from_str(&args.request)?;
+    let request = serde_json::Value::from_str(args.request.as_ref().map(|s| s.as_str()).unwrap_or("null"))?;
     let mut promise =
         app.world_mut()
             .command(|cmds| -> Result<Promise<serde_json::Value>, DiagramError> {

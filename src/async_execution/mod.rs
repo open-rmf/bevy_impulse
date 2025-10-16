@@ -26,7 +26,7 @@ pub(crate) use single_threaded_execution::SingleThreadedExecution;
 #[cfg(feature = "single_threaded_async")]
 use single_threaded_execution::SingleThreadedExecutionSender;
 
-pub(crate) use bevy_tasks::Task as TaskHandle;
+pub use bevy_tasks::Task as TaskHandle;
 
 #[cfg(not(feature = "single_threaded_async"))]
 pub(crate) type CancelSender = AsyncComputeTaskPoolSender;

@@ -1,0 +1,38 @@
+[package]
+name = "ros2-workflow-examples"
+edition = "2021"
+version = "0.0.1"
+
+[[bin]]
+name = "nav-executor"
+path = "src/nav_executor.rs"
+
+[[bin]]
+name = "fake-plan-generator"
+path = "src/fake_plan_generator.rs"
+
+[[bin]]
+name = "goal-requester"
+path = "src/goal_requester.rs"
+
+[dependencies]
+# Dependency to help us run the diagram editor and executor
+crossflow_diagram_editor = { version = "0.0.1", path = "../../diagram-editor", features = ["basic_executor"] }
+
+# Dependencies for the nav operation catalog
+crossflow = { version = "0.0.1", path = "../..", features = ["diagram", "ros2"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+# Dependencies for our custom ROS operations
+rclrs = { workspace = true }
+nav_msgs = { version = "*", features = ["serde", "schemars"] }
+geometry_msgs = { version = "*", features = ["serde", "schemars"] }
+std_msgs = { version = "*", features = ["serde", "schemars"] }
+builtin_interfaces = { version = "*", features = ["serde", "schemars"] }
+example_interfaces = { version = "*", features = ["serde", "schemars"] }
+
+# Dependencies for goal-requester and fake-plan-generator
+clap = { workspace = true }
+rand = "0.9.2"

@@ -137,6 +137,11 @@ pub use provider::*;
 pub mod request;
 pub use request::*;
 
+#[cfg(feature = "ros2")]
+pub mod ros2;
+#[cfg(feature = "ros2")]
+pub use ros2::*;
+
 pub mod service;
 pub use service::*;
 
@@ -433,6 +438,9 @@ pub mod prelude {
         },
         diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions, Section},
     };
+
+    #[cfg(feature = "ros2")]
+    pub use crate::BuildRos2;
 
     pub use futures::FutureExt;
 }

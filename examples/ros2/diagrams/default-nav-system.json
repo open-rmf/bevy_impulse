@@ -1,0 +1,136 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "setup",
+  "ops": {
+    "quit_request": {
+      "type": "transform",
+      "cel": "\"workflow ended by /end_workflow request\"",
+      "next": {
+        "builtin": "terminate"
+      }
+    },
+    "end_workflow": {
+      "type": "node",
+      "builder": "nav_manager__std_msgs_msg_Empty__subscription",
+      "next": {
+        "builtin": "dispose"
+      },
+      "display_text": "End Workflow",
+      "config": {
+        "topic": "end_workflow"
+      },
+      "stream_out": {
+        "out": "quit_request"
+      }
+    },
+    "setup": {
+      "type": "fork_clone",
+      "next": [
+        "print_welcome",
+        "receive_cancel",
+        "end_workflow"
+      ]
+    },
+    "print_welcome": {
+      "type": "node",
+      "builder": "print",
+      "config": {
+        "message": "Waiting to receive goals from 'request_goal' topic",
+        "include_value": false
+      },
+      "next": "receive_goals"
+    },
+    "receive_goals": {
+      "type": "node",
+      "builder": "nav_manager__nav_msgs_msg_Goals__subscription",
+      "config": {
+        "topic": "request_goal"
+      },
+      "next": "quit_error",
+      "display_text": "Receive Goals",
+      "stream_out": {
+        "out": "fetch_plans"
+      }
+    },
+    "quit_error": {
+      "type": "transform",
+      "cel": "\"error: unable to receive goals\"",
+      "next": {
+        "builtin": "terminate"
+      }
+    },
+    "fetch_plans": {
+      "type": "node",
+      "builder": "fetch_plans",
+      "config": {
+        "planner_service": "get_plan",
+        "tolerance": 0.1
+      },
+      "next": {
+        "builtin": "dispose"
+      },
+      "display_text": "Fetch Plans",
+      "stream_out": {
+        "paths": "path_buffer"
+      }
+    },
+    "path_buffer": {
+      "type": "buffer",
+      "settings": {
+        "retention": "keep_all"
+      }
+    },
+    "listen_to_path_buffer": {
+      "type": "listen",
+      "buffers": [
+        "path_buffer"
+      ],
+      "next": "print_paths"
+    },
+    "print_paths": {
+      "type": "node",
+      "builder": "print_from_buffer",
+      "config": "Paths currently waiting to run:\n",
+      "next": {
+        "builtin": "dispose"
+      },
+      "display_text": "Print Paths"
+    },
+    "receive_cancel": {
+      "type": "node",
+      "builder": "nav_manager__std_msgs_msg_Empty__subscription",
+      "config": {
+        "topic": "cancel_goals"
+      },
+      "next": {
+        "builtin": "dispose"
+      },
+      "display_text": "Cancel Goals",
+      "stream_out": {
+        "out": "trigger_clear_paths"
+      }
+    },
+    "trigger_clear_paths": {
+      "type": "transform",
+      "cel": "null",
+      "next": "access_paths"
+    },
+    "access_paths": {
+      "type": "buffer_access",
+      "buffers": [
+        "path_buffer"
+      ],
+      "next": "clear_paths"
+    },
+    "clear_paths": {
+      "type": "node",
+      "builder": "clear_paths",
+      "next": {
+        "builtin": "dispose"
+      },
+      "display_text": "Clear Paths"
+    }
+  }
+}

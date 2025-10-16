@@ -36,6 +36,7 @@ bevy_time = "0.16"
 bevy_utils = "0.16"
 clap = { version = "4.5.23", features = ["derive"] }
 mime_guess = "2.0.5"
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow", features = ["serde", "schemars"] }
 schemars = "0.9.0"
 serde = "1.0.219"
 serde_json = "1.0.140"
@@ -105,6 +106,10 @@ zenoh = { workspace = true, features = ["unstable"], optional = true }
 zenoh-ext = { workspace = true, features = ["unstable"], optional = true }
 # --- end zenoh
 
+# --- Dependencies for ros2 feature
+rclrs = { workspace = true, optional = true }
+# --- end ros2
+
 tracing = { workspace = true }
 strum = { version = "0.26.3", optional = true, features = ["derive"] }
 semver = { version = "1.0.24", optional = true }
@@ -147,6 +152,13 @@ zenoh = [
   "dep:tonic-prost-build",
 ]
 
+ros2 = [
+  "dep:rclrs",
+  "dep:futures-lite",
+  "dep:serde",
+  "dep:schemars",
+]
+
 # Turn on all capability related features. This differs from --all-features
 # because it would not include single_threaded_async which has a diminishing
 # effect on capabilities.
@@ -155,6 +167,7 @@ maximal = [
   "trace",
   "grpc",
   "zenoh",
+  "ros2",
 ]
 
 [dev-dependencies]
@@ -167,6 +180,7 @@ test-log = { version = "0.2.16", features = [
 members = [
   "examples/diagram/calculator",
   "examples/zenoh-examples",
+  "examples/ros2",
   "diagram-editor",
   "diagram-editor/wasm",
   "examples/diagram/calculator_wasm",
@@ -181,3 +195,6 @@ doc = false
 
 [build-dependencies]
 tonic-prost-build = { workspace = true, optional = true }
+
+[patch.crates-io]
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "crossflow" }

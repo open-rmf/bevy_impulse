@@ -5,9 +5,64 @@
 [![Crates.io Version](https://img.shields.io/crates/v/crossflow)](https://crates.io/crates/crossflow)
 
 > [!IMPORTANT]
-> For the ROS 2 integration feature, check out the [`ros2` branch](https://github.com/open-rmf/crossflow/tree/ros2).
->
-> That feature is kept separate for now because it requires additional non-Rust setup. It will be merged into `main` after dynamic message introspection is finished.
+> You are on a branch with experimental support for ROS 2 via [`rclrs`](https://github.com/ros2-rust/ros2_rust).
+> This will require more steps to set up than usual, so installation instructions for the necessary packages are below:
+
+1. Install ROS Jazzy according to the [normal installation instructions](https://docs.ros.org/en/jazzy/Installation.html).
+
+2. Install Rust according to the [normal installation instructions](https://www.rust-lang.org/tools/install).
+
+3. Run these commands to set up the workspace with the message bindings:
+
+```bash
+sudo apt install -y git libclang-dev python3-pip python3-vcstool # libclang-dev is required by bindgen
+```
+
+```bash
+pip install git+https://github.com/colcon/colcon-cargo.git --break-system-packages
+```
+
+```bash
+pip install git+https://github.com/colcon/colcon-ros-cargo.git --break-system-packages
+```
+
+For now we need a fork of `cargo-ament-build` until [this PR](https://github.com/ros2-rust/cargo-ament-build/pull/26) is merged and released:
+
+```bash
+cargo install --git https://github.com/mxgrey/cargo-ament-build
+```
+
+Create a workspace with the necessary repos:
+
+```bash
+mkdir -p workspace/src && cd workspace
+```
+
+```bash
+git clone https://github.com/open-rmf/crossflow src/crossflow -b ros2
+```
+
+```bash
+vcs import src < src/crossflow/ros2-feature.repos
+```
+
+Source the ROS distro and build the workspace:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+```bash
+colcon build --allow-overriding action_msgs builtin_interfaces common_interfaces composition_interfaces example_interfaces geometry_msgs lifecycle_msgs nav_msgs rcl_interfaces rosgraph_msgs rosidl_default_generators rosidl_default_runtime sensor_msgs sensor_msgs_py service_msgs statistics_msgs std_msgs std_srvs trajectory_msgs type_description_interfaces unique_identifier_msgs visualization_msgs
+```
+
+4. After `colcon build` has finished, you should see a `.cargo/config.toml` file inside your workspace, with `[patch.crates-io.___]` sections pointing to the generated message bindings. Now you should source the workspace using
+
+```bash
+source install/setup.bash
+```
+
+Now you can run the [ROS 2 example](examples/ros2/README.md). You can also create your own crate in this colcon workspace and link as shown in the example.
 
 # Reactive Programming and Workflow Engine in Bevy
 
