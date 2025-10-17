@@ -41,6 +41,7 @@ jobs:
 
     - name: Build default features
       run: cargo build --workspace
+
     - name: Test default features
       run: cargo test --workspace
 
