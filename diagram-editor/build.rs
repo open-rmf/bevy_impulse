@@ -48,10 +48,24 @@ mod frontend {
             let mut tar_builder = Builder::new(enc);
             tar_builder.mode(tar::HeaderMode::Deterministic);
 
-            // Add the entire "dist" directory to the archive, preserving its name within the archive.
-            tar_builder
-                .append_dir_all(".", dist_dir_path)
-                .expect("Failed to add directory to tar archive");
+            let mut paths_to_archive: Vec<PathBuf> = Vec::new();
+            for entry in walkdir::WalkDir::new(dist_dir_path) {
+                let entry = entry.expect("Failed to read directory entry");
+                let path = entry.path();
+                if path.is_file() {
+                    paths_to_archive.push(path.to_path_buf());
+                }
+            }
+            paths_to_archive.sort_unstable();
+
+            for path in paths_to_archive {
+                let relative_path = path
+                    .strip_prefix(dist_dir_path)
+                    .expect("Failed to strip prefix");
+                tar_builder
+                    .append_path_with_name(&path, relative_path)
+                    .expect("Failed to add file to tar archive");
+            }
             tar_builder.finish().expect("Failed to finish tar archive");
             println!(
                 "Successfully compressed '{}' into '{:?}'",

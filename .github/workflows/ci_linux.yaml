@@ -41,14 +41,6 @@ jobs:
 
     - name: Build default features
       run: cargo build --workspace
-      env:
-        BUILD_FRONTEND: "1"
-
-    - name: Test dist output
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-dist-output
-        path: diagram-editor/dist.tar.gz
 
     - name: Test default features
       run: cargo test --workspace
