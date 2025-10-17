@@ -13,7 +13,7 @@
     "check": "biome check --write",
     "check:ts": "tsc --noEmit",
     "dev": "rsbuild dev --open --environment rest-backend",
-    "dev:backend": "cargo run --manifest-path ../examples/diagram/calculator/Cargo.toml -- serve --port 3001",
+    "dev:backend": "BUILD_FRONTEND=1 cargo run --manifest-path ../examples/diagram/calculator/Cargo.toml -- serve --port 3001",
     "dev:wasm": "scripts/dev-wasm.sh",
     "format": "biome format --write",
     "preview": "rsbuild preview",
