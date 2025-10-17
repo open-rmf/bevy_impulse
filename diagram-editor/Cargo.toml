@@ -22,7 +22,7 @@ categories = [
   "concurrency",
   "game-development",
 ]
-exclude = ["/build.rs"]
+include = ["/dist.tar.gz", "/server/**"]
 
 [lib]
 path = "server/lib.rs"
@@ -31,10 +31,7 @@ path = "server/lib.rs"
 axum = { workspace = true, features = ["json"], default-features = false }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
-crossflow = { version = "0.0.1", path = "..", features = [
-  "diagram",
-  "trace",
-] }
+crossflow = { version = "0.0.1", path = "..", features = ["diagram", "trace"] }
 clap = { workspace = true, features = ["derive"], optional = true }
 flate2 = { version = "1.1.1", optional = true }
 futures-util = { workspace = true }
