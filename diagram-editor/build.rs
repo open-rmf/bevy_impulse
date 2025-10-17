@@ -44,8 +44,8 @@ mod frontend {
         if Path::new(dist_dir_path).exists() {
             let tar_gz_file =
                 File::create(&output_tar_gz_path).expect("Failed to create output tar.gz file");
-            let enc = GzEncoder::new(tar_gz_file, Compression::default());
-            let mut tar_builder = Builder::new(enc);
+            // let enc = GzEncoder::new(tar_gz_file, Compression::default());
+            let mut tar_builder = Builder::new(tar_gz_file);
             tar_builder.mode(tar::HeaderMode::Deterministic);
 
             // Add the entire "dist" directory to the archive, preserving its name within the archive.
