@@ -66,14 +66,16 @@ function DiagramSidePanel({
     state: { open, tab, expanded },
     close,
     showTab,
+    setWidth,
   } = useDiagramSidePanel();
   const [diagramProperties, setDiagramProperties] = useDiagramProperties();
   const loadContext = useLoadContext();
   const theme = useTheme();
   const drawerWidth = useDiagramSidePanelWidth();
+  const [resizing, setResizing] = React.useState(false);
   const widthTransition = theme.transitions.create('width', {
     easing: theme.transitions.easing.easeInOut,
-    duration: theme.transitions.duration.standard,
+    duration: resizing ? 0 : theme.transitions.duration.standard,
   });
   const [copyTooltipText, setCopyTooltipText] = React.useState(
     'Copy this input example into clipboard',
@@ -133,6 +135,28 @@ function DiagramSidePanel({
           },
         }}
       >
+        <Box
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setResizing(true);
+          }}
+          onPointerMove={(event) => {
+            if (resizing) setWidth(window.innerWidth - event.clientX);
+          }}
+          onLostPointerCapture={() => setResizing(false)}
+          sx={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 6,
+            zIndex: 1,
+            cursor: 'col-resize',
+            touchAction: 'none',
+          }}
+        />
         <Stack
           direction="row"
           sx={{

@@ -22,13 +22,13 @@ function useViewportWidth(): number {
 
 export function useDiagramSidePanelWidth(): number {
   const {
-    state: { open, expanded },
+    state: { open, expanded, width },
   } = useDiagramSidePanel();
   const viewportWidth = useViewportWidth();
 
   return useMemo(
-    () => getDiagramSidePanelWidth(viewportWidth, { open, expanded }),
-    [expanded, open, viewportWidth],
+    () => getDiagramSidePanelWidth(viewportWidth, { open, expanded, width }),
+    [expanded, open, viewportWidth, width],
   );
 }
 
@@ -36,7 +36,7 @@ export function useResponsiveEditPopoverPosition(
   anchorPosition?: PopoverPosition,
 ): PopoverPosition | undefined {
   const {
-    state: { open, expanded },
+    state: { open, expanded, width },
   } = useDiagramSidePanel();
   const viewportWidth = useViewportWidth();
 
@@ -46,9 +46,9 @@ export function useResponsiveEditPopoverPosition(
         ? constrainEditPopoverPosition({
             anchorPosition,
             viewportWidth,
-            sidePanel: { open, expanded },
+            sidePanel: { open, expanded, width },
           })
         : undefined,
-    [anchorPosition, expanded, open, viewportWidth],
+    [anchorPosition, expanded, open, viewportWidth, width],
   );
 }

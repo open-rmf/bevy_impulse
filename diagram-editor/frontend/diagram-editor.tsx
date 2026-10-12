@@ -117,6 +117,7 @@ import {
   loadTemplate,
 } from './utils/load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
+import { updateOperationIds } from './utils/operation-id';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -243,25 +244,9 @@ function getInteractionNodeId(
   operationId: string,
   nodeManager: NodeManager,
 ): string | null {
-  const normalizedId = operationId.startsWith(':')
-    ? operationId.slice(1)
-    : operationId;
-
-  if (normalizedId === '(terminate)') {
-    return (
-      nodeManager.tryGetNode(joinNamespaces(ROOT_NAMESPACE, TERMINATE_ID))
-        ?.id ?? null
-    );
-  }
-
-  if (normalizedId.endsWith(':(terminate)')) {
-    const namespace = normalizedId.slice(0, -':(terminate)'.length);
-    return (
-      nodeManager.tryGetNode(
-        joinNamespaces(ROOT_NAMESPACE, namespace, TERMINATE_ID),
-      )?.id ?? null
-    );
-  }
+  const normalizedId = (
+    operationId.startsWith(':') ? operationId.slice(1) : operationId
+  ).replace(/\(terminate\)$/, TERMINATE_ID);
 
   if (normalizedId.startsWith('(') || normalizedId.includes(':(exposed):')) {
     return null;
@@ -430,6 +415,7 @@ function DiagramEditor() {
     state: {
       open: sidePanelOpen,
       expanded: sidePanelExpanded,
+      width: sidePanelWidth,
       tab: sidePanelTab,
     },
   } = useDiagramSidePanel();
@@ -503,6 +489,7 @@ function DiagramEditor() {
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
+      changes = updateOperationIds(changes, nodeManager.nodes);
       const transitiveChanges: NodeChange<DiagramEditorNode>[] = [];
 
       // resize and reposition scope
@@ -1446,6 +1433,7 @@ function DiagramEditor() {
               sidePanel: {
                 open: sidePanelOpen,
                 expanded: sidePanelExpanded,
+                width: sidePanelWidth,
               },
             }),
           });

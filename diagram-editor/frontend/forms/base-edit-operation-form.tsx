@@ -41,13 +41,30 @@ function BaseEditOperationForm({
       <CardContent>
         <Stack spacing={2}>
           <TextField
-            required
             label="id"
             fullWidth
-            value={node.data.opId}
+            value={
+              node.data.op.extensions?.['crossflow-auto-id'] === true
+                ? ''
+                : node.data.opId
+            }
+            placeholder={node.data.opId}
+            helperText="Leave blank to generate an ID automatically."
             onChange={(ev) => {
-              const updatedNode = { ...node };
-              updatedNode.data.opId = ev.target.value;
+              const updatedNode = {
+                ...node,
+                data: {
+                  ...node.data,
+                  opId: ev.target.value,
+                  op: {
+                    ...node.data.op,
+                    extensions: {
+                      ...node.data.op.extensions,
+                      'crossflow-auto-id': ev.target.value === '',
+                    },
+                  },
+                },
+              };
               onChange?.({
                 type: 'replace',
                 id: node.id,

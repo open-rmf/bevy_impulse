@@ -1,8 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from '@testing-library/react';
 import {
   DiagramSidePanelProvider,
   useDiagramSidePanel,
 } from './diagram-side-panel-controller';
+
+import { getDiagramSidePanelWidth } from './diagram-side-panel-layout';
 
 function Harness() {
   const panel = useDiagramSidePanel();
@@ -38,6 +46,18 @@ function renderHarness() {
 }
 
 describe('DiagramSidePanelProvider', () => {
+  test.each(['startEnvironmentCreate', 'startEnvironmentEdit'] as const)(
+    '%s restores automatic widening after manual resizing',
+    (action) => {
+      const { result } = renderHook(useDiagramSidePanel, {
+        wrapper: DiagramSidePanelProvider,
+      });
+      act(() => result.current.setWidth(500));
+      act(() => result.current[action]());
+      expect(getDiagramSidePanelWidth(1440, result.current.state)).toBe(900);
+    },
+  );
+
   test('opens and selects an environment through one shared action', () => {
     renderHarness();
 

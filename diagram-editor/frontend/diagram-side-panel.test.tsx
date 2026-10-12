@@ -1,5 +1,5 @@
 import { createTheme, ThemeProvider } from '@mui/material';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { DiagramPropertiesProvider } from './diagram-properties-provider';
 import DiagramSidePanel from './diagram-side-panel';
@@ -92,6 +92,16 @@ describe('DiagramSidePanel', () => {
     expect(drawer.style.width).toBe('420px');
     expect(drawerPaper.style.width).toBe('420px');
     expect(drawerPaper.style.transition).toContain('width');
+
+    const edge = drawerPaper.firstElementChild as HTMLElement;
+    edge.setPointerCapture = jest.fn();
+    for (const type of ['pointerdown', 'pointermove']) {
+      fireEvent(
+        edge,
+        new MouseEvent(type, { bubbles: true, button: 0, clientX: 740 }),
+      );
+    }
+    expect(drawer.style.width).toBe('700px');
   });
 
   test('animates the drawer to its expanded pixel width', async () => {

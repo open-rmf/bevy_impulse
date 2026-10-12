@@ -16,6 +16,7 @@ export interface DiagramSidePanelState {
   selectedEnvironmentName?: string;
   mode: EnvironmentPanelMode;
   expanded: boolean;
+  width?: number;
 }
 
 export interface OpenEnvironmentsOptions {
@@ -34,6 +35,7 @@ export interface DiagramSidePanelController {
   startEnvironmentEdit: () => void;
   finishEnvironmentEdit: () => void;
   setExpanded: (expanded: boolean) => void;
+  setWidth: (width: number) => void;
 }
 
 const InitialState: DiagramSidePanelState = {
@@ -98,6 +100,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
         selectedEnvironmentName: environmentName,
         mode: create ? 'create' : 'view',
         expanded: create,
+        width: undefined,
       }));
     },
     [],
@@ -118,6 +121,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       selectedEnvironmentName: undefined,
       mode: 'create',
       expanded: true,
+      width: undefined,
     }));
   }, []);
 
@@ -128,6 +132,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       tab: 'environments',
       mode: 'edit',
       expanded: true,
+      width: undefined,
     }));
   }, []);
 
@@ -136,6 +141,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       ...prev,
       mode: 'view',
       expanded: false,
+      width: undefined,
     }));
   }, []);
 
@@ -143,7 +149,12 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
     setState((prev) => ({
       ...prev,
       expanded,
+      width: undefined,
     }));
+  }, []);
+
+  const setWidth = useCallback((width: number) => {
+    setState((prev) => ({ ...prev, width }));
   }, []);
 
   const value = useMemo<DiagramSidePanelController>(
@@ -158,6 +169,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       startEnvironmentEdit,
       finishEnvironmentEdit,
       setExpanded,
+      setWidth,
     }),
     [
       close,
@@ -165,6 +177,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       openEnvironments,
       selectEnvironment,
       setExpanded,
+      setWidth,
       showTab,
       startEnvironmentCreate,
       startEnvironmentEdit,

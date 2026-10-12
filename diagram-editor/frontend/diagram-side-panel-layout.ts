@@ -3,6 +3,7 @@ import type { PopoverPosition } from '@mui/material';
 export interface SidePanelLayoutState {
   open: boolean;
   expanded: boolean;
+  width?: number;
 }
 
 export const NormalSidePanelWidth = 420;
@@ -21,7 +22,11 @@ export function getDiagramSidePanelWidth(
   }
 
   return Math.min(
-    sidePanel.expanded ? ExpandedSidePanelWidth : NormalSidePanelWidth,
+    Math.max(
+      NormalSidePanelWidth,
+      sidePanel.width ??
+        (sidePanel.expanded ? ExpandedSidePanelWidth : NormalSidePanelWidth),
+    ),
     Math.max(0, viewportWidth - MinimumVisibleCanvasWidth),
   );
 }
