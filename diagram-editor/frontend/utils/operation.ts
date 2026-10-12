@@ -41,6 +41,19 @@ export function isArrayBufferSelection(
   return Array.isArray(bufferSelection);
 }
 
+export function withTargetInput<T extends DiagramEditorEdge>(
+  edge: T,
+  next: NextOperation,
+): T {
+  if (typeof next === 'object' && !isBuiltin(next)) {
+    edge.data.input = {
+      type: 'sectionInput',
+      inputId: Object.values(next)[0],
+    };
+  }
+  return edge;
+}
+
 function createStreamOutEdges(
   streamOuts: Record<string, NextOperation>,
   node: OperationNode,
@@ -55,9 +68,12 @@ function createStreamOutEdges(
     if (targetNode) {
       const target = targetNode.id;
       edges.push(
-        createStreamOutEdge(node.id, HandleId.DataStream, target, null, {
-          streamId,
-        }),
+        withTargetInput(
+          createStreamOutEdge(node.id, HandleId.DataStream, target, null, {
+            streamId,
+          }),
+          nextOp,
+        ),
       );
     }
   }
@@ -71,7 +87,7 @@ function getBufferFetchType(
   if (node.type !== 'join' || node.data.op.type !== 'join') {
     return null;
   }
-  if (node.data.op.clone && key in node.data.op.clone) {
+  if (node.data.op.clone?.includes(key)) {
     return BufferFetchType.Clone;
   } else {
     return BufferFetchType.Pull;
@@ -92,13 +108,15 @@ function createBufferEdges(
       )?.id;
       if (source) {
         const fetchType = getBufferFetchType(node, idx);
-        edges.push(
-          createBufferEdge(source, null, node.id, null, {
-            type: 'bufferSeq',
-            seq: idx,
-            ...(fetchType !== null ? { fetchType } : {}),
-          }),
-        );
+        const edge = createBufferEdge(source, null, node.id, null, {
+          type: 'bufferSeq',
+          seq: idx,
+          ...(fetchType !== null ? { fetchType } : {}),
+        });
+        if (typeof buffer === 'object' && !isBuiltin(buffer)) {
+          edge.data.output = { bufferId: Object.values(buffer)[0] };
+        }
+        edges.push(edge);
       }
     }
   } else if (isKeyedBufferSelection(buffers)) {
@@ -109,13 +127,15 @@ function createBufferEdges(
       )?.id;
       if (source) {
         const fetchType = getBufferFetchType(node, key);
-        edges.push(
-          createBufferEdge(source, null, node.id, null, {
-            type: 'bufferKey',
-            key,
-            ...(fetchType !== null ? { fetchType } : {}),
-          }),
-        );
+        const edge = createBufferEdge(source, null, node.id, null, {
+          type: 'bufferKey',
+          key,
+          ...(fetchType !== null ? { fetchType } : {}),
+        });
+        if (typeof buffer === 'object' && !isBuiltin(buffer)) {
+          edge.data.output = { bufferId: Object.values(buffer)[0] };
+        }
+        edges.push(edge);
       }
     }
   }
@@ -126,6 +146,9 @@ function createBufferEdges(
 export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
   const edges: DiagramEditorEdge[] = [];
   const nodeManager = new NodeManager(nodes);
+  const addDataEdge = (edge: DiagramEditorEdge, next: NextOperation) => {
+    edges.push(withTargetInput(edge, next));
+  };
 
   interface State {
     namespace: string;
@@ -162,7 +185,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (nextNodeId) {
-            edges.push(createDefaultEdge(node.id, null, nextNodeId, null));
+            addDataEdge(
+              createDefaultEdge(node.id, null, nextNodeId, null),
+              op.next,
+            );
           }
 
           break;
@@ -173,7 +199,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push(createDefaultEdge(node.id, null, target, null));
+            addDataEdge(
+              createDefaultEdge(node.id, null, target, null),
+              op.next,
+            );
           }
           if (op.stream_out) {
             edges.push(
@@ -188,7 +217,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push(createDefaultEdge(node.id, null, target, null));
+            addDataEdge(
+              createDefaultEdge(node.id, null, target, null),
+              op.next,
+            );
           }
           if (op.stream_out) {
             edges.push(
@@ -203,7 +235,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push(createDefaultEdge(node.id, null, target, null));
+            addDataEdge(
+              createDefaultEdge(node.id, null, target, null),
+              op.next,
+            );
           }
           break;
         }
@@ -214,7 +249,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               next,
             )?.id;
             if (target) {
-              edges.push(createDefaultEdge(node.id, null, target, null));
+              addDataEdge(createDefaultEdge(node.id, null, target, null), next);
             }
           }
           break;
@@ -226,8 +261,9 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               next,
             )?.id;
             if (target) {
-              edges.push(
+              addDataEdge(
                 createUnzipEdge(node.id, null, target, null, { seq: idx }),
+                next,
               );
             }
           }
@@ -243,23 +279,25 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.err,
           )?.id;
           if (okTarget) {
-            edges.push(
+            addDataEdge(
               createForkResultOkEdge(
                 node.id,
                 HandleId.ForkResultOk,
                 okTarget,
                 null,
               ),
+              op.ok,
             );
           }
           if (errTarget) {
-            edges.push(
+            addDataEdge(
               createForkResultErrEdge(
                 node.id,
                 HandleId.ForkResultErr,
                 errTarget,
                 null,
               ),
+              op.err,
             );
           }
           break;
@@ -272,8 +310,9 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push(
+                addDataEdge(
                   createSplitKeyEdge(node.id, null, target, null, { key }),
+                  next,
                 );
               }
             }
@@ -285,8 +324,9 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push(
+                addDataEdge(
                   createSplitSeqEdge(node.id, null, target, null, { seq: idx }),
+                  next,
                 );
               }
             }
@@ -297,7 +337,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               op.remaining,
             )?.id;
             if (target) {
-              edges.push(createSplitRemainingEdge(node.id, null, target, null));
+              addDataEdge(
+                createSplitRemainingEdge(node.id, null, target, null),
+                op.remaining,
+              );
             }
           }
           break;
@@ -310,10 +353,11 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push(
+                addDataEdge(
                   createSectionEdge(node.id, null, target, null, {
                     output: outputId,
                   }),
+                  next,
                 );
               }
             }
@@ -326,7 +370,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push(createDefaultEdge(node.id, null, target, null));
+            addDataEdge(
+              createDefaultEdge(node.id, null, target, null),
+              op.next,
+            );
           }
 
           if (op.stream_out) {
@@ -344,8 +391,9 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.start,
           );
           if (scopeStart && scopeStartTarget) {
-            edges.push(
+            addDataEdge(
               createDefaultEdge(scopeStart.id, null, scopeStartTarget.id, null),
+              op.start,
             );
           }
 
@@ -373,7 +421,17 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
         node.data.targetId,
       )?.id;
       if (target) {
-        edges.push(createDefaultEdge(node.id, null, target, null));
+        const edge = withTargetInput(
+          createDefaultEdge(node.id, null, target, null),
+          node.data.targetId,
+        );
+        if (
+          node.type === 'sectionBuffer' &&
+          edge.data.input.type === 'sectionInput'
+        ) {
+          edge.data.input = { ...edge.data.input, type: 'sectionBuffer' };
+        }
+        edges.push(edge);
       }
     }
   }

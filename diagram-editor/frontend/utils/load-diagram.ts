@@ -9,7 +9,6 @@ import {
   createStartNode,
   createTerminateNode,
   type DiagramEditorNode,
-  isOperationNode,
   START_ID,
 } from '../nodes';
 import { loadState } from '../persist-state';
@@ -22,7 +21,7 @@ import type {
 import { getSchema } from './ajv';
 import { exportDiagram } from './export-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
-import { buildEdges, isBuiltin } from './operation';
+import { buildEdges, withTargetInput } from './operation';
 
 export interface Graph {
   nodes: DiagramEditorNode[];
@@ -151,21 +150,20 @@ function buildGraph(diagram: Diagram, initialGraph?: Graph): Graph {
 
   const edges = graph.edges;
   const diagramStart = diagram.start;
-  const startNode = isBuiltin(diagramStart)
-    ? nodes.find((n) => n.type === diagramStart.builtin)
-    : nodes.find(
-        (n) =>
-          isOperationNode(n) &&
-          n.data.namespace === ROOT_NAMESPACE &&
-          n.data.opId === diagramStart,
-      );
+  const startNode = new NodeManager(nodes).getNodeFromNextOp(
+    ROOT_NAMESPACE,
+    diagramStart,
+  );
   if (startNode) {
     edges.push(
-      createDefaultEdge(
-        joinNamespaces(ROOT_NAMESPACE, START_ID),
-        null,
-        startNode.id,
-        null,
+      withTargetInput(
+        createDefaultEdge(
+          joinNamespaces(ROOT_NAMESPACE, START_ID),
+          null,
+          startNode.id,
+          null,
+        ),
+        diagramStart,
       ),
     );
   }

@@ -8,6 +8,7 @@ function ForkCloneNodeComp(props: NodeProps<OperationNode<'fork_clone'>>) {
   return (
     <BaseNode
       {...props}
+      compact
       icon={<ForkCloneIcon />}
       label="Fork Clone"
       handles={

@@ -1,12 +1,11 @@
 import { getConnectedEdges } from '@xyflow/react';
-import equal from 'fast-deep-equal';
 import type { DiagramProperties } from '../diagram-properties-provider';
 import {
   BufferFetchType,
   type DiagramEditorEdge,
   type StreamOutEdge,
 } from '../edges';
-import type { NodeManager } from '../node-manager';
+import { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
   isBuiltinNode,
@@ -130,9 +129,13 @@ function syncBufferSelection(
     }
 
     const sourceNode = nodeManager.getNode(edge.source);
-    if (sourceNode.type !== 'buffer') {
-      throw new Error('expected source to be a buffer node');
+    if (sourceNode.type !== 'buffer' && sourceNode.type !== 'section') {
+      throw new Error('expected source to expose a buffer');
     }
+    const bufferRef: NextOperation =
+      sourceNode.type === 'section'
+        ? { [sourceNode.data.opId]: edge.data.output.bufferId || '' }
+        : sourceNode.data.opId;
     // check that the buffer selection is compatible
     if (edge.type === 'buffer' && edge.data.input?.type === 'bufferSeq') {
       if (!isArrayBufferSelection(bufferSelection)) {
@@ -149,7 +152,7 @@ function syncBufferSelection(
           the same slot type.',
         );
       }
-      bufferSelection[edge.data.input.seq] = sourceNode.data.opId;
+      bufferSelection[edge.data.input.seq] = bufferRef;
     }
     if (edge.type === 'buffer' && edge.data.input?.type === 'bufferKey') {
       if (!isKeyedBufferSelection(bufferSelection)) {
@@ -166,7 +169,7 @@ function syncBufferSelection(
           the same slot type.',
         );
       }
-      bufferSelection[edge.data.input.key] = sourceNode.data.opId;
+      bufferSelection[edge.data.input.key] = bufferRef;
     }
 
     if (targetOp.type === 'join') {
@@ -263,17 +266,18 @@ function syncEdge(
           throw new Error('expected "default" edge');
         }
 
-        const newNextOp = nodeManager.getTargetNextOp(edge);
-        if (!sourceOp.next.some((next) => equal(next, newNextOp))) {
-          sourceOp.next.push(newNextOp);
-        }
+        sourceOp.next.push(nodeManager.getTargetNextOp(edge));
         break;
       }
       case 'unzip': {
         if (edge.type !== 'unzip') {
           throw new Error('expected "unzip" edge');
         }
-        sourceOp.next[edge.data.output.seq] = nodeManager.getTargetNextOp(edge);
+        setSequentialKey(
+          sourceOp.next,
+          edge.data.output.seq,
+          nodeManager.getTargetNextOp(edge),
+        );
         break;
       }
       case 'fork_result': {
@@ -330,12 +334,13 @@ function syncEdge(
       case 'scope': {
         if (edge.type === 'streamOut') {
           syncStreamOut(nodeManager, sourceOp, edge);
-        } else if (edge.type !== 'default') {
+        } else if (edge.type === 'default') {
+          sourceOp.next = nodeManager.getTargetNextOp(edge);
+        } else {
           throw new Error(
             'scope operation must have default or streamOut edge',
           );
         }
-        sourceOp.next = nodeManager.getTargetNextOp(edge);
         break;
       }
       case 'stream_out': {
@@ -466,7 +471,10 @@ function syncEdges(
     if (edge.type === 'streamOut') {
       const sourceNode = nodeManager.getNode(edge.source);
       if (isOperationNode(sourceNode)) {
-        if (sourceNode.data.op.type === 'script') {
+        if (
+          sourceNode.data.op.type === 'script' ||
+          sourceNode.data.op.type === 'scope'
+        ) {
           return true;
         }
         if (sourceNode.data.op.type === 'node') {
@@ -505,6 +513,7 @@ export function exportDiagram(
   templates: Record<string, SectionTemplate>,
   diagramProperties: DiagramProperties,
 ): Diagram {
+  nodeManager = new NodeManager(JSON.parse(JSON.stringify(nodeManager.nodes)));
   const diagram: Diagram = {
     $schema:
       'https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json',
@@ -545,6 +554,7 @@ export function exportTemplate(
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
 ): SectionTemplate {
+  nodeManager = new NodeManager(JSON.parse(JSON.stringify(nodeManager.nodes)));
   const fakeRoot: SubOperations = {
     start: { builtin: 'dispose' },
     ops: {},

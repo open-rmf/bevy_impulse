@@ -7,7 +7,7 @@ import type {
   SectionBufferInputSlotData,
 } from './input-slots';
 
-export type BufferOutputData = Record<string, never>;
+export type BufferOutputData = { bufferId?: string };
 
 export type BufferEdge = Edge<
   BufferOutputData,

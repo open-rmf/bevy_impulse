@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { DiagramEditorEdge } from '../edges';
+import { createDefaultEdge, type DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
 import {
   createOperationNode,
@@ -16,6 +16,13 @@ import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import testDiagram from './test-data/test-diagram.json';
 import testDiagramScope from './test-data/test-diagram-scope.json';
 
+function operationNode(
+  op: Parameters<typeof createOperationNode>[3],
+  id: string,
+) {
+  return createOperationNode(ROOT_NAMESPACE, undefined, { x: 0, y: 0 }, op, id);
+}
+
 const stubRegistry: DiagramElementMetadata = {
   messages: [],
   nodes: {},
@@ -29,6 +36,11 @@ const stubRegistry: DiagramElementMetadata = {
   sections: {},
   trace_supported: false,
 };
+
+async function loadSource(source: unknown) {
+  const [, { graph }] = await loadDiagramJson(JSON.stringify(source));
+  return { nodeManager: new NodeManager(graph.nodes), edges: graph.edges };
+}
 
 test('export diagram', async () => {
   const [
@@ -45,6 +57,60 @@ test('export diagram', async () => {
     {},
   );
   expect(diagram).toEqual(testDiagram);
+});
+
+test('exporting new connections does not rewrite the live nodes', () => {
+  const source = operationNode(
+    { type: 'node', builder: 'source', next: { builtin: 'dispose' } },
+    'source',
+  );
+  const target = operationNode({ type: 'buffer' }, 'target');
+  const nodes = [source, target];
+  const before = JSON.stringify(nodes);
+  const edges = [createDefaultEdge(source.id, null, target.id, null)];
+  const manager = new NodeManager(nodes);
+  expect(
+    exportDiagram(stubRegistry, manager, edges, {}, {}).ops.source,
+  ).toMatchObject({ next: 'target' });
+  expect(JSON.stringify(nodes)).toBe(before);
+  expect(
+    exportTemplate(stubRegistry, manager, edges).ops?.source,
+  ).toMatchObject({ next: 'target' });
+  expect(JSON.stringify(nodes)).toBe(before);
+});
+
+test('export unzip with an unused first output', async () => {
+  const unzip = {
+    type: 'unzip',
+    next: [{ builtin: 'dispose' }, { builtin: 'terminate' }],
+  };
+  const { nodeManager, edges } = await loadSource({
+    version: '0.1.0',
+    start: 'unzip',
+    ops: { unzip },
+  });
+  const diagram = exportDiagram(stubRegistry, nodeManager, edges, {}, {});
+  expect(diagram.ops.unzip).toEqual(unzip);
+});
+
+test('round-trips an exposed section buffer and its clone selection', async () => {
+  const ops = {
+    section: { type: 'section', builder: 'storage' },
+    join: {
+      type: 'join',
+      buffers: { stored: { section: 'cache' } },
+      clone: ['stored'],
+      next: { builtin: 'dispose' },
+    },
+  };
+  const { nodeManager, edges } = await loadSource({
+    version: '0.1.0',
+    start: { builtin: 'dispose' },
+    ops,
+  });
+  expect(
+    exportDiagram(stubRegistry, nodeManager, edges, {}, {}).ops.join,
+  ).toEqual(ops.join);
 });
 
 test('export diagram with scope', async () => {
@@ -84,6 +150,37 @@ test('export diagram with scope', async () => {
   ).id;
   diagram = exportDiagram(stubRegistry, nodeManager, edges, {}, {});
   expect(diagram.ops.scope.start).toBe('mul4');
+});
+
+test('scope stream export preserves the main destination', async () => {
+  const source = {
+    version: '0.1.0',
+    start: 'scope',
+    ops: {
+      scope: {
+        type: 'scope',
+        start: 'work',
+        ops: {
+          work: {
+            type: 'node',
+            builder: 'work',
+            next: { builtin: 'terminate' },
+          },
+        },
+        next: 'result',
+        stream_out: { progress: 'log' },
+      },
+      result: {
+        type: 'node',
+        builder: 'result',
+        next: { builtin: 'terminate' },
+      },
+      log: { type: 'node', builder: 'log', next: { builtin: 'dispose' } },
+    },
+  };
+  const { nodeManager, edges } = await loadSource(source);
+  const exported = exportDiagram(stubRegistry, nodeManager, edges, {}, {});
+  expect(exported.ops.scope).toEqual(source.ops.scope);
 });
 
 test('export diagram with templates', () => {
@@ -146,4 +243,38 @@ test('export diagram with templates', () => {
     throw new Error('expected template buffers to be a mapping');
   }
   expect(template.buffers.test_buffer).toBe('test_op_buffer');
+});
+
+test('round-trips named section destinations from START and an operation', async () => {
+  const source = {
+    version: '0.1.0',
+    start: { section: 'request' },
+    ops: {
+      section: {
+        type: 'section',
+        builder: 'processor',
+        connect: { response: 'node' },
+      },
+      node: { type: 'node', builder: 'worker', next: { section: 'request' } },
+    },
+  };
+  const { nodeManager, edges } = await loadSource(source);
+  expect(exportDiagram(stubRegistry, nodeManager, edges, {}, {})).toMatchObject(
+    source,
+  );
+});
+
+test('round-trips repeated fork-clone branches without collapsing their output indexes', async () => {
+  const ops = {
+    fork: { type: 'fork_clone', next: ['target', 'target'] },
+    target: { type: 'buffer' },
+  };
+  const { nodeManager, edges } = await loadSource({
+    version: '0.1.0',
+    start: 'fork',
+    ops,
+  });
+  expect(
+    exportDiagram(stubRegistry, nodeManager, edges, {}, {}).ops.fork,
+  ).toEqual(ops.fork);
 });

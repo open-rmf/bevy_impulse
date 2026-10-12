@@ -1,6 +1,8 @@
 import { createContext, type PropsWithChildren, useContext } from 'react';
 
 export interface InteractionVisualizationContext {
+  isWorkflowRunning: boolean;
+  setWorkflowRunning: React.Dispatch<React.SetStateAction<boolean>>;
   activeNodeIds: Set<string>;
   visitedNodeIds: Set<string>;
   clearInteractionVisualization: () => void;
@@ -11,6 +13,8 @@ export interface InteractionVisualizationContext {
 
 const DefaultInteractionVisualizationContext: InteractionVisualizationContext =
   {
+    isWorkflowRunning: false,
+    setWorkflowRunning: () => {},
     activeNodeIds: new Set(),
     visitedNodeIds: new Set(),
     clearInteractionVisualization: () => {},

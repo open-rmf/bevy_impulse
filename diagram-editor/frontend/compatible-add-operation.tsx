@@ -1,8 +1,6 @@
 import {
-  Box,
   Button,
   ButtonGroup,
-  CircularProgress,
   Stack,
   styled,
   TextField,
@@ -14,10 +12,9 @@ import type { AddOperationSelection } from './add-operation';
 import { useCompatibilityChecker } from './connection-compatibility-provider';
 import { EditorMode, useEditorMode } from './editor-mode';
 import { useNodeManager } from './node-manager';
-import { isOperationNode, NodeIcon } from './nodes';
+import { getAddOperationIcon, isOperationNode } from './nodes';
 import { useRegistry } from './registry-provider';
 import {
-  type AddOperationCandidate,
   filterCompatibleAddOperations,
   getAddOperationCandidates,
   getVisibleAddOperations,
@@ -50,12 +47,10 @@ export function CompatibleAddOperation({
 }: CompatibleAddOperationProps) {
   const registry = useRegistry();
   const nodeManager = useNodeManager();
-  const checker = useCompatibilityChecker();
+  const { setMenuPreview } = useCompatibilityChecker();
   const [editorMode] = useEditorMode();
   const [search, setSearch] = React.useState('');
-  const [compatibleCandidates, setCompatibleCandidates] = React.useState<
-    AddOperationCandidate[] | null
-  >(null);
+  const [inspectedKey, setInspectedKey] = React.useState<string | null>(null);
 
   const namespace = React.useMemo(() => {
     const parentNode = parentId && nodeManager.tryGetNode(parentId);
@@ -101,24 +96,17 @@ export function CompatibleAddOperation({
   ]);
 
   React.useEffect(() => {
-    let active = true;
-    setCompatibleCandidates(null);
-
-    const checks = candidates.flatMap((candidate) => {
-      const changes = candidate.createChanges({
+    const candidate = candidates.find(({ key }) => key === inspectedKey);
+    if (candidate) {
+      const nodeChanges = candidate.createChanges({
         namespace,
         parentId,
         newNodePosition,
         nodeManager,
       });
-      const primaryNode = changes[0]?.item;
-      if (!primaryNode) {
-        return [];
-      }
-
-      return [
-        {
-          id: candidate.key,
+      const primaryNode = nodeChanges[0]?.item;
+      if (primaryNode)
+        setMenuPreview({
           connection: createConnectionFromHandles(
             {
               nodeId: sourceConnection.sourceNodeId,
@@ -128,78 +116,42 @@ export function CompatibleAddOperation({
             primaryNode.id,
             null,
           ),
-          nodeChanges: changes,
-        },
-      ];
-    });
-
-    checker
-      .checkConnections(checks)
-      .then((results) => {
-        if (!active) {
-          return;
-        }
-        setCompatibleCandidates(
-          candidates.filter(
-            (candidate) => results.get(candidate.key)?.status === 'compatible',
-          ),
-        );
-      })
-      .catch(() => {
-        if (active) {
-          setCompatibleCandidates([]);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
+          nodeChanges,
+        });
+    } else setMenuPreview(null);
+    return () => setMenuPreview(null);
   }, [
     candidates,
-    checker,
+    inspectedKey,
     namespace,
-    nodeManager,
     parentId,
     newNodePosition,
+    nodeManager,
     sourceConnection,
+    setMenuPreview,
   ]);
 
   const operations = React.useMemo(() => {
-    if (!compatibleCandidates) {
-      return null;
-    }
-
     const trimmedSearch = search.trim().toLowerCase();
     if (!trimmedSearch) {
-      return compatibleCandidates;
+      return candidates;
     }
 
-    return compatibleCandidates.filter((operation) =>
+    return candidates.filter((operation) =>
       operation.label.toLowerCase().includes(trimmedSearch),
     );
-  }, [compatibleCandidates, search]);
+  }, [candidates, search]);
 
   const title =
     sourceConnection.sourceHandleType === 'target'
-      ? 'Compatible previous operations'
-      : 'Compatible next operations';
+      ? 'Add previous operation'
+      : 'Add next operation';
 
   React.useEffect(() => {
     if (operations) {
       onContentChange?.();
     }
   }, [onContentChange, operations]);
-
-  if (!operations) {
-    return (
-      <Box sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <CircularProgress size={16} />
-        <Typography variant="body2">
-          Checking compatible operations...
-        </Typography>
-      </Box>
-    );
-  }
 
   return (
     <Stack spacing={1} sx={{ px: 1.5, pt: 1.5, pb: 1.5, width: 260 }}>
@@ -215,13 +167,17 @@ export function CompatibleAddOperation({
           orientation="vertical"
           variant="contained"
           size="small"
-          aria-label="Add compatible operation button group"
+          aria-label="Add operation button group"
           sx={{ width: '100%' }}
         >
           {operations.map((operation) => (
             <StyledOperationButton
               key={operation.key}
-              startIcon={<NodeIcon />}
+              startIcon={getAddOperationIcon(operation.key)}
+              onMouseEnter={() => setInspectedKey(operation.key)}
+              onMouseLeave={() => setInspectedKey(null)}
+              onFocus={() => setInspectedKey(operation.key)}
+              onBlur={() => setInspectedKey(null)}
               onClick={() => {
                 const changes = operation.createChanges({
                   namespace,
@@ -244,8 +200,8 @@ export function CompatibleAddOperation({
       {operations.length === 0 && (
         <Typography variant="body2">
           {search.trim()
-            ? 'No compatible operations match this filter.'
-            : 'No compatible operations are available here yet.'}
+            ? 'No operations match this filter.'
+            : 'No operations are available here yet.'}
         </Typography>
       )}
     </Stack>

@@ -8,15 +8,8 @@ import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
 import type { SectionTemplate } from '../types/api';
 
-function getTemplateInputs(template: SectionTemplate): string[] {
-  if (!template.inputs) {
-    return [];
-  }
-  if (Array.isArray(template.inputs)) {
-    return template.inputs;
-  } else {
-    return Object.keys(template.inputs);
-  }
+function slotNames(slots: SectionTemplate['inputs']): string[] {
+  return Array.isArray(slots) ? slots : Object.keys(slots || {});
 }
 
 export interface DataInputEdgeFormProps {
@@ -29,20 +22,28 @@ export function DataInputForm({ edge, onChange }: DataInputEdgeFormProps) {
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
   const targetNode = nodeManager.tryGetNode(edge.target);
+  const bufferAlias =
+    nodeManager.tryGetNode(edge.source)?.type === 'sectionBuffer';
 
-  const inputs = useMemo(() => {
+  const { inputs, buffers } = useMemo(() => {
     if (!targetNode || !isSectionNode(targetNode)) {
-      return [];
+      return { inputs: [], buffers: [] };
     }
 
     if (typeof targetNode.data.op.builder === 'string') {
       const sectionBuilder = registry.sections[targetNode.data.op.builder];
-      return Object.keys(sectionBuilder?.interface.inputs || {});
+      return {
+        inputs: Object.keys(sectionBuilder?.interface.inputs || {}),
+        buffers: Object.keys(sectionBuilder?.interface.buffers || {}),
+      };
     } else if (typeof targetNode.data.op.template === 'string') {
       const template = templates[targetNode.data.op.template];
-      return template ? getTemplateInputs(template) : [];
+      return {
+        inputs: slotNames(template?.inputs),
+        buffers: slotNames(template?.buffers),
+      };
     } else {
-      return [];
+      return { inputs: [], buffers: [] };
     }
   }, [targetNode, registry, templates]);
 
@@ -56,9 +57,10 @@ export function DataInputForm({ edge, onChange }: DataInputEdgeFormProps) {
         <Autocomplete
           freeSolo
           autoSelect
-          options={inputs}
+          options={bufferAlias ? buffers : [...inputs, ...buffers]}
           value={
-            edge.data.input.type === 'sectionInput'
+            edge.data.input.type === 'sectionInput' ||
+            edge.data.input.type === 'sectionBuffer'
               ? edge.data.input.inputId
               : ''
           }
@@ -70,7 +72,13 @@ export function DataInputForm({ edge, onChange }: DataInputEdgeFormProps) {
                 ...edge,
                 data: {
                   output: edge.data.output,
-                  input: { type: 'sectionInput', inputId: value || '' },
+                  input: {
+                    type:
+                      bufferAlias || buffers.includes(value || '')
+                        ? 'sectionBuffer'
+                        : 'sectionInput',
+                    inputId: value || '',
+                  },
                 },
               } as DiagramEditorEdge,
             });

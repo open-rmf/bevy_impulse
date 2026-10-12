@@ -1,7 +1,9 @@
 import { Box, type BoxProps } from '@mui/material';
 import type React from 'react';
-import type { DiagramOperation } from '../types/api';
-import { exhaustiveCheck } from '../utils/exhaustive-check';
+import type {
+  AddOperationCandidateKey,
+  AddOperationKey,
+} from '../utils/add-operation-catalog';
 
 export interface MaterialSymbolProps extends BoxProps {
   symbol: string;
@@ -31,6 +33,10 @@ export function ForkCloneIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="content_copy" />;
 }
 
+export function ForkResultIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="question_mark" />;
+}
+
 export function TransformIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="change_circle" />;
 }
@@ -53,16 +59,14 @@ export function SplitIcon(): React.JSX.Element {
   );
 }
 
-export function ForkResultIcon(): React.JSX.Element {
-  return <MaterialSymbol symbol="question_mark" />;
-}
-
 export function ListenIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="hearing" />;
 }
 
 export function JoinIcon(): React.JSX.Element {
-  return <MaterialSymbol symbol="arrow_and_edge" />;
+  return (
+    <MaterialSymbol symbol="call_merge" sx={{ transform: 'scaleY(-1)' }} />
+  );
 }
 
 export function StreamOutIcon(): React.JSX.Element {
@@ -93,38 +97,36 @@ export function UnzipIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="format_list_numbered" />;
 }
 
-export function getIcon(op: DiagramOperation): React.ComponentType {
-  switch (op.type) {
-    case 'node':
-      return NodeIcon;
-    case 'section':
-      return SectionIcon;
-    case 'fork_clone':
-      return ForkCloneIcon;
-    case 'unzip':
-      return UnzipIcon;
-    case 'fork_result':
-      return ForkResultIcon;
-    case 'split':
-      return SplitIcon;
-    case 'join':
-      return JoinIcon;
-    case 'transform':
-      return TransformIcon;
-    case 'script':
-      return ScriptIcon;
-    case 'buffer':
-      return BufferIcon;
-    case 'buffer_access':
-      return BufferAccessIcon;
-    case 'listen':
-      return ListenIcon;
-    case 'scope':
-      return ScopeIcon;
-    case 'stream_out':
-      return StreamOutIcon;
-    default:
-      exhaustiveCheck(op);
-      throw new Error('unknown op');
+export const OPERATION_ICONS: Record<AddOperationKey, React.ReactNode> = {
+  sectionInput: <SectionInputIcon />,
+  sectionOutput: <SectionOutputIcon />,
+  sectionBuffer: <SectionBufferIcon />,
+  node: <NodeIcon />,
+  fork_clone: <ForkCloneIcon />,
+  unzip: <UnzipIcon />,
+  fork_result: <ForkResultIcon />,
+  split: <SplitIcon />,
+  join: <JoinIcon />,
+  transform: <TransformIcon />,
+  buffer: <BufferIcon />,
+  buffer_access: <BufferAccessIcon />,
+  listen: <ListenIcon />,
+  stream_out: <StreamOutIcon />,
+  scope: <ScopeIcon />,
+  section: <SectionIcon />,
+  script: <ScriptIcon />,
+};
+
+const VALID_OPERATION_KEYS = new Set<string>(Object.keys(OPERATION_ICONS));
+
+export function getAddOperationIcon(
+  key: AddOperationCandidateKey | string,
+): React.ReactNode {
+  if (typeof key === 'string' && key.startsWith('node:')) {
+    return OPERATION_ICONS.node;
   }
+  if (typeof key === 'string' && VALID_OPERATION_KEYS.has(key)) {
+    return OPERATION_ICONS[key as AddOperationKey];
+  }
+  return OPERATION_ICONS.node;
 }

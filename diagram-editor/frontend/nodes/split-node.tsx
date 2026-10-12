@@ -8,6 +8,7 @@ function SplitNodeComp(props: NodeProps<OperationNode<'split'>>) {
   return (
     <BaseNode
       {...props}
+      compact
       icon={<SplitIcon />}
       label="Split"
       handles={

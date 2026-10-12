@@ -7,17 +7,18 @@ import { ForkResultIcon } from './icons';
 
 const ForkResultOkHandle = styled(Handle)(({ theme }) => ({
   left: '25%',
-  background: `linear-gradient(-45deg, ${theme.palette.success.main} 50%, var(--xy-handle-background-color-default) 50%)`,
+  backgroundColor: theme.palette.success.main,
 }));
 const ForkResultErrHandle = styled(Handle)(({ theme }) => ({
   left: '75%',
-  background: `linear-gradient(-45deg, ${theme.palette.error.main} 50%, var(--xy-handle-background-color-default) 50%)`,
+  backgroundColor: theme.palette.error.main,
 }));
 
 function ForkResultNodeComp(props: NodeProps<OperationNode<'fork_result'>>) {
   return (
     <BaseNode
       {...props}
+      compact
       icon={<ForkResultIcon />}
       label="Fork Result"
       handles={

@@ -3,6 +3,7 @@ import {
   createDefaultEdge,
   createForkResultErrEdge,
   createForkResultOkEdge,
+  createSectionEdge,
   type DiagramEditorEdge,
 } from '../edges';
 import { HandleId } from '../handles';
@@ -26,7 +27,50 @@ import {
 } from './connection';
 import { ROOT_NAMESPACE } from './namespace';
 
+function operationNode(
+  op: Parameters<typeof createOperationNode>[3],
+  id: string,
+) {
+  return createOperationNode(ROOT_NAMESPACE, undefined, { x: 0, y: 0 }, op, id);
+}
+
 describe('connection helpers', () => {
+  test('reconnect preserves a named output and a second wire cannot reuse it', () => {
+    const source = operationNode(
+      { type: 'section', template: 'example' },
+      'source',
+    );
+    const target = operationNode({ type: 'buffer' }, 'target');
+    const edge = createSectionEdge(source.id, null, target.id, null, {
+      output: 'response',
+    });
+    const manager = new NodeManager([source, target]);
+    expect(
+      createEdgeFromConnection(
+        {
+          source: source.id,
+          target: target.id,
+          sourceHandle: null,
+          targetHandle: null,
+        },
+        manager,
+        [edge],
+        edge.id,
+      ),
+    ).toMatchObject({
+      valid: true,
+      edge: {
+        id: edge.id,
+        type: 'section',
+        data: { output: { output: 'response' } },
+      },
+    });
+    const duplicate = { ...edge, id: 'duplicate' };
+    expect(
+      validateEdgeSimple(duplicate, manager, [edge, duplicate]).valid,
+    ).toBe(false);
+  });
+
   test('normalizes a drag that starts from a source handle', () => {
     const connection = createConnectionFromDraggedHandle({
       fromNodeId: 'source-node',
@@ -172,6 +216,7 @@ describe('connection helpers', () => {
         targetHandle: null,
       },
       nodeManager,
+      [],
     );
 
     expect(result.valid).toBe(true);
@@ -188,6 +233,27 @@ describe('connection helpers', () => {
 });
 
 describe('validate edges', () => {
+  test('rejects mixed keyed and indexed buffer selections', () => {
+    const source = operationNode({ type: 'buffer' }, 'source');
+    const target = operationNode(
+      { type: 'listen', buffers: [], next: { builtin: 'dispose' } },
+      'target',
+    );
+    const indexed = createBufferEdge(source.id, null, target.id, null, {
+      type: 'bufferSeq',
+      seq: 0,
+    });
+    const keyed = createBufferEdge(source.id, null, target.id, null, {
+      type: 'bufferKey',
+      key: 'route',
+    });
+    const manager = new NodeManager([source, target]);
+    expect(validateEdgeSimple(indexed, manager, [indexed, keyed]).valid).toBe(
+      false,
+    );
+    expect(validateEdgeSimple(indexed, manager, [indexed]).valid).toBe(true);
+  });
+
   test('"buffer" can only connect to operations that accepts a buffer', () => {
     const node = createOperationNode(
       ROOT_NAMESPACE,
@@ -373,7 +439,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('"sectionBuffer" can only connect to operations that accepts buffer', () => {
+  test('"sectionBuffer" aliases an internal buffer and cannot feed a buffer consumer', () => {
     const sectionBuffer = createSectionBufferNode(
       'test_section_buffer',
       'test_section_buffer',
@@ -393,6 +459,16 @@ describe('validate edges', () => {
       { type: 'listen', buffers: [], next: { builtin: 'dispose' } },
       'test_op_listen',
     );
+    const buffer = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'buffer' },
+      'storage',
+    );
+    expect(getValidEdgeTypes(sectionBuffer, null, buffer, null)).toEqual([
+      'default',
+    ]);
 
     {
       const validEdges = getValidEdgeTypes(sectionBuffer, null, node, null);
@@ -401,8 +477,7 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(sectionBuffer, null, listen, null);
-      expect(validEdges.length).toBe(1);
-      expect(validEdges).toContain('buffer');
+      expect(validEdges).toEqual([]);
     }
   });
 
@@ -622,7 +697,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('buffer edges connecting to a section must have "sectionBuffer" input', () => {
+  test('an exposed section buffer receives messages, not a buffer access edge', () => {
     const bufferNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -655,11 +730,11 @@ describe('validate edges', () => {
         inputId: 'test',
       });
       const result = validateEdgeSimple(edge, nodeManager, []);
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
     }
   });
 
-  test('data edges connecting to a section must have "sectionInput" input', () => {
+  test('data edges connecting to a section select an input or exposed buffer', () => {
     const nodeNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -696,5 +771,19 @@ describe('validate edges', () => {
       const result = validateEdgeSimple(edge, nodeManager, edges);
       expect(result.valid).toBe(true);
     }
+    const bufferInput = createDefaultEdge(
+      nodeNode.id,
+      null,
+      sectionNode.id,
+      null,
+      { type: 'sectionBuffer', inputId: 'storage' },
+    );
+    expect(
+      validateEdgeSimple(
+        bufferInput,
+        new NodeManager([nodeNode, sectionNode]),
+        [],
+      ),
+    ).toMatchObject({ valid: true });
   });
 });

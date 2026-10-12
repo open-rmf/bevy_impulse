@@ -10,56 +10,17 @@ import type { NodeAddChange, XYPosition } from '@xyflow/react';
 import React from 'react';
 import { EditorMode, useEditorMode } from './editor-mode';
 import { useNodeManager } from './node-manager';
-import type { DiagramEditorNode } from './nodes';
 import {
-  BufferAccessIcon,
-  BufferIcon,
-  ForkCloneIcon,
-  ForkResultIcon,
+  type DiagramEditorNode,
+  getAddOperationIcon,
   isOperationNode,
-  JoinIcon,
-  ListenIcon,
-  NodeIcon,
-  ScopeIcon,
-  ScriptIcon,
-  SectionBufferIcon,
-  SectionIcon,
-  SectionInputIcon,
-  SectionOutputIcon,
-  SplitIcon,
-  StreamOutIcon,
-  TransformIcon,
-  UnzipIcon,
 } from './nodes';
-import {
-  type AddOperationKey,
-  getVisibleAddOperations,
-} from './utils/add-operation-catalog';
+import { getVisibleAddOperations } from './utils/add-operation-catalog';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
 });
-
-const OPERATION_ICONS: Record<AddOperationKey, React.ReactNode> = {
-  sectionInput: <SectionInputIcon />,
-  sectionOutput: <SectionOutputIcon />,
-  sectionBuffer: <SectionBufferIcon />,
-  node: <NodeIcon />,
-  fork_clone: <ForkCloneIcon />,
-  unzip: <UnzipIcon />,
-  fork_result: <ForkResultIcon />,
-  split: <SplitIcon />,
-  join: <JoinIcon />,
-  transform: <TransformIcon />,
-  buffer: <BufferIcon />,
-  buffer_access: <BufferAccessIcon />,
-  listen: <ListenIcon />,
-  stream_out: <StreamOutIcon />,
-  scope: <ScopeIcon />,
-  section: <SectionIcon />,
-  script: <ScriptIcon />,
-};
 
 export interface AddOperationSelection {
   primaryNodeId: string;
@@ -131,7 +92,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           {operations.map((operation) => (
             <StyledOperationButton
               key={operation.key}
-              startIcon={OPERATION_ICONS[operation.key]}
+              startIcon={getAddOperationIcon(operation.key)}
               onClick={() => {
                 const changes = operation.createChanges({
                   namespace,

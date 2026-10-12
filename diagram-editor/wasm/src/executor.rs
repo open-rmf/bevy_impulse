@@ -154,25 +154,37 @@ mod tests {
         let source_port: PortRef = output_ref(&add3_op_id).next().into();
         let target_port: PortRef = OperationRef::Terminate(Default::default()).into();
         let result = check_compatibility(CompatibilityRequestWasm(CompatibilityRequest {
-            candidates: vec![api::executor::CompatibilityCandidate {
-                id: "add-to-terminate".to_string(),
-                diagram,
-                focus_ports: vec![source_port.clone(), target_port.clone()],
-                source_port: Some(source_port),
-                target_port: Some(target_port),
-            }],
+            diagram,
+            connections: vec![
+                api::executor::CompatibilityConnection {
+                    id: "unknown".to_string(),
+                    focus_ports: vec![(&NextOperation::Name("missing".into())).into()],
+                    source_port: None,
+                    target_port: None,
+                },
+                api::executor::CompatibilityConnection {
+                    id: "add-to-terminate".to_string(),
+                    focus_ports: vec![source_port.clone(), target_port.clone()],
+                    source_port: Some(source_port),
+                    target_port: Some(target_port),
+                },
+            ],
         }))
         .await
         .unwrap();
 
         let response: api::executor::CompatibilityResponse =
             serde_wasm_bindgen::from_value(result).unwrap();
-        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results.len(), 2);
         assert_eq!(
             response.results[0].status,
+            api::executor::CompatibilityStatus::Unknown
+        );
+        assert_eq!(
+            response.results[1].status,
             api::executor::CompatibilityStatus::Compatible
         );
-        assert!(!response.results[0].provisional);
+        assert!(!response.results[1].provisional);
     }
 
     #[wasm_bindgen_test]
@@ -197,9 +209,9 @@ mod tests {
         .unwrap();
 
         let result = check_compatibility(CompatibilityRequestWasm(CompatibilityRequest {
-            candidates: vec![api::executor::CompatibilityCandidate {
+            diagram,
+            connections: vec![api::executor::CompatibilityConnection {
                 id: "buffer-to-listen".to_string(),
-                diagram,
                 focus_ports: vec![buffer_port],
                 source_port: None,
                 target_port: None,
@@ -213,7 +225,7 @@ mod tests {
         assert_eq!(response.results.len(), 1);
         assert_eq!(
             response.results[0].status,
-            api::executor::CompatibilityStatus::Compatible
+            api::executor::CompatibilityStatus::Unknown
         );
         assert!(response.results[0].provisional);
     }

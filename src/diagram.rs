@@ -1111,6 +1111,12 @@ pub enum DiagramErrorCode {
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
 
+    #[error("buffer message type {source_type} does not satisfy the required type {target_type}")]
+    IncompatibleBufferType {
+        source_type: Cow<'static, str>,
+        target_type: Cow<'static, str>,
+    },
+
     #[error("inconsistent type hints for the buffer message: {}", format_list(&.0))]
     InconsistentBufferHints(Vec<MessageTypeHint>),
 

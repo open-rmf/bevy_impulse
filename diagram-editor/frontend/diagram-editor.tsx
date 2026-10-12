@@ -35,16 +35,19 @@ import {
 import { inflateSync, strFromU8 } from 'fflate';
 import React, { Suspense } from 'react';
 import AddOperation from './add-operation';
-import { useApiClient } from './api-client-provider';
 import CommandPanel from './command-panel';
 import { CompatibleAddOperation } from './compatible-add-operation';
-import { ConnectionCompatibilityProvider } from './connection-compatibility-provider';
+import {
+  ConnectionCompatibilityProvider,
+  useCompatibilityGraph,
+} from './connection-compatibility-provider';
 import { ConnectionHintPanel } from './connection-hint-panel';
 import {
   createEmptyDiagramProperties,
   useDiagramProperties,
 } from './diagram-properties-provider';
 import { useDiagramSidePanel } from './diagram-side-panel-controller';
+import { getEditPopoverPositionForNode } from './diagram-side-panel-layout';
 import {
   clearDraftWorkspace,
   type DraftWorkspaceContent,
@@ -95,10 +98,7 @@ import { useDraftPagehideFlush } from './use-draft-pagehide-flush';
 import { EdgesProvider } from './use-edges';
 import { autoLayout } from './utils/auto-layout';
 import { isRemoveChange } from './utils/change';
-import {
-  buildCompatibilityCandidate,
-  checkCompatibilityCandidates,
-} from './utils/compatibility';
+import { prepareConnection } from './utils/compatibility';
 import {
   createConnectionFromHandles,
   getValidEdgeTypes,
@@ -208,6 +208,7 @@ interface ProvidersProps {
   loadContext: LoadContext | null;
   nodeManager: NodeManager;
   edges: DiagramEditorEdge[];
+  compatibility: ReturnType<typeof useCompatibilityGraph>;
 }
 
 function Providers({
@@ -216,6 +217,7 @@ function Providers({
   loadContext,
   nodeManager,
   edges,
+  compatibility,
   children,
 }: React.PropsWithChildren<ProvidersProps>) {
   return (
@@ -223,10 +225,7 @@ function Providers({
       <LoadContextProvider value={loadContext}>
         <NodeManagerProvider value={nodeManager}>
           <EdgesProvider value={edges}>
-            <ConnectionCompatibilityProvider
-              nodeManager={nodeManager}
-              edges={edges}
-            >
+            <ConnectionCompatibilityProvider value={compatibility}>
               <InteractionVisualizationProvider
                 value={interactionVisualizationContext}
               >
@@ -303,6 +302,7 @@ function DiagramEditor() {
     React.useState(() => new Set<string>());
   const [interactionVisitedNodeIds, setInteractionVisitedNodeIds] =
     React.useState(() => new Set<string>());
+  const [isWorkflowRunning, setWorkflowRunning] = React.useState(false);
   const clearInteractionVisualization = React.useCallback(() => {
     setInteractionActiveNodeIds(new Set());
     setInteractionVisitedNodeIds(new Set());
@@ -355,6 +355,8 @@ function DiagramEditor() {
       () => ({
         activeNodeIds: interactionActiveNodeIds,
         visitedNodeIds: interactionVisitedNodeIds,
+        isWorkflowRunning,
+        setWorkflowRunning,
         clearInteractionVisualization,
         markInteractionFinished,
         markInteractionOperationFinished,
@@ -364,6 +366,7 @@ function DiagramEditor() {
         clearInteractionVisualization,
         interactionActiveNodeIds,
         interactionVisitedNodeIds,
+        isWorkflowRunning,
         markInteractionFinished,
         markInteractionOperationFinished,
         markInteractionOperationStarted,
@@ -372,12 +375,49 @@ function DiagramEditor() {
   const savedNodes = React.useRef<DiagramEditorNode[]>([]);
 
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
+  const [reconnectingEdgeId, setReconnectingEdgeId] = React.useState<string>();
+  const [hoveredEdgeId, setHoveredEdgeId] = React.useState<string>();
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string>();
+  const clearEdgeInspection = () => {
+    setHoveredEdgeId(undefined);
+    setSelectedEdgeId(undefined);
+  };
+  const reconnectingEdge = React.useRef<string | undefined>(undefined);
   const savedEdges = React.useRef<DiagramEditorEdge[]>([]);
 
   const [templates, setTemplates] = useTemplates();
   const registry = useRegistry();
-  const apiClient = useApiClient();
   const [diagramProperties, setDiagramProperties] = useDiagramProperties();
+  const compatibility = useCompatibilityGraph(
+    {
+      registry,
+      nodeManager,
+      edges,
+      templates,
+      diagramProperties,
+      templateId:
+        editorMode.mode === EditorMode.Template
+          ? editorMode.templateId
+          : undefined,
+    },
+    reconnectingEdgeId,
+  );
+  const displayEdges = React.useMemo(
+    () =>
+      edges.map((edge) =>
+        !isWorkflowRunning &&
+        compatibility.edgeResults.get(edge.id)?.status === 'incompatible'
+          ? {
+              ...edge,
+              className: [edge.className, 'edge-incompatible']
+                .filter(Boolean)
+                .join(' '),
+            }
+          : edge,
+      ),
+    [edges, compatibility.edgeResults, isWorkflowRunning],
+  );
+  const inspectedEdgeId = hoveredEdgeId ?? selectedEdgeId;
   const {
     drafts: transientEditorDrafts,
     replaceDrafts: replaceTransientEditorDrafts,
@@ -387,7 +427,11 @@ function DiagramEditor() {
   } = useTransientEditorDrafts();
   const openScriptEnvironment = useScriptEnvironmentNavigation();
   const {
-    state: { open: sidePanelOpen, tab: sidePanelTab },
+    state: {
+      open: sidePanelOpen,
+      expanded: sidePanelExpanded,
+      tab: sidePanelTab,
+    },
   } = useDiagramSidePanel();
 
   const updateEditorModeAction = React.useCallback(
@@ -761,7 +805,6 @@ function DiagramEditor() {
         handleNodeChange(change);
         closeAllPopovers();
       };
-
       if (node.type === 'scope') {
         return (
           <EditScopeForm
@@ -929,61 +972,27 @@ function DiagramEditor() {
     [],
   );
 
-  const tryCreateCompatibleEdge = React.useCallback(
-    async (
-      conn: Connection,
-      id?: string,
-      nodeChanges: Extract<
-        NodeChange<DiagramEditorNode>,
-        { type: 'add' }
-      >[] = [],
-    ): Promise<DiagramEditorEdge | null> => {
-      const built = buildCompatibilityCandidate({
-        id: id || 'new-edge',
-        registry,
-        nodeManager,
-        edges,
-        templates,
-        diagramProperties,
-        connection: conn,
-        nodeChanges,
-        edgeId: id,
-      });
-
-      if (!built.ok) {
-        showErrorToast(built.result.reason);
-        return null;
-      }
-
-      let results: Awaited<ReturnType<typeof checkCompatibilityCandidates>>;
-      try {
-        results = await checkCompatibilityCandidates(apiClient, [
-          built.candidate,
-        ]);
-      } catch (error) {
-        showErrorToast(
-          error instanceof Error ? error.message : 'compatibility check failed',
-        );
-        return null;
-      }
-      const compatibility = results.get(built.candidate.id);
-      if (compatibility?.status !== 'compatible') {
-        showErrorToast(compatibility?.reason || 'connection is not compatible');
-        return null;
-      }
-
-      return built.candidate.edge;
-    },
-    [
-      apiClient,
-      diagramProperties,
+  const tryCreateEdge = (
+    connection: Connection,
+    edgeId?: string,
+    nodeChanges: Extract<NodeChange<DiagramEditorNode>, { type: 'add' }>[] = [],
+  ): DiagramEditorEdge | null => {
+    const result = prepareConnection({
+      connection,
+      edgeId,
+      nodeManager: nodeChanges.length
+        ? new NodeManager([...nodes, ...nodeChanges.map(({ item }) => item)])
+        : nodeManager,
       edges,
-      nodeManager,
       registry,
-      showErrorToast,
       templates,
-    ],
-  );
+    });
+    if (!result.valid) {
+      showErrorToast(result.error);
+      return null;
+    }
+    return result.edge;
+  };
 
   const [enableExport, setEnableExport] = React.useState(true);
 
@@ -1232,10 +1241,11 @@ function DiagramEditor() {
       loadContext={loadContext}
       nodeManager={nodeManager}
       edges={edges}
+      compatibility={compatibility}
     >
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={displayEdges}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         nodeTypes={NODE_TYPES}
@@ -1297,38 +1307,53 @@ function DiagramEditor() {
         }}
         onEdgesChange={handleEdgeChanges}
         onEdgesDelete={() => {
+          clearEdgeInspection();
           closeAllPopovers();
         }}
+        onConnectStart={clearEdgeInspection}
         onConnect={(conn) => {
-          void (async () => {
-            const newEdge = await tryCreateCompatibleEdge(conn);
-            if (newEdge) {
-              setEdges((prev) => addEdge(newEdge, prev));
-            }
-          })();
+          clearEdgeInspection();
+          const newEdge = tryCreateEdge(conn);
+          if (newEdge) {
+            setEdges((prev) => addEdge(newEdge, prev));
+          }
         }}
         isValidConnection={(conn) => {
-          return validateConnectionSimple(conn, nodeManager, edges).valid;
+          return validateConnectionSimple(
+            conn,
+            nodeManager,
+            edges.filter((edge) => edge.id !== reconnectingEdge.current),
+          ).valid;
+        }}
+        onReconnectStart={(_, edge) => {
+          clearEdgeInspection();
+          reconnectingEdge.current = edge.id;
+          setReconnectingEdgeId(edge.id);
+        }}
+        onReconnectEnd={() => {
+          reconnectingEdge.current = undefined;
+          setReconnectingEdgeId(undefined);
         }}
         onReconnect={(oldEdge, newConnection) => {
-          void (async () => {
-            const newEdge = await tryCreateCompatibleEdge(
-              newConnection,
-              oldEdge.id,
-            );
-            if (newEdge) {
+          const newEdge = tryCreateEdge(newConnection, oldEdge.id);
+          if (newEdge) {
+            setEdges((prev) => {
+              // React Flow's oldEdge includes display-only diagnostics.
               const updatedEdge = {
-                ...oldEdge,
+                ...prev.find((edge) => edge.id === oldEdge.id),
                 type: newEdge.type,
                 data: newEdge.data,
               } as DiagramEditorEdge;
-              setEdges((prev) =>
-                reconnectEdge(updatedEdge, newConnection, prev),
-              );
-            }
-          })();
+              return reconnectEdge(updatedEdge, newConnection, prev);
+            });
+          }
         }}
         onConnectEnd={(event, connectionState) => {
+          clearEdgeInspection();
+          // React Flow also calls this new-wire handler when reconnecting.
+          if (reconnectingEdge.current && !connectionState.toHandle) {
+            return;
+          }
           if (!connectionState.fromHandle) {
             return;
           }
@@ -1350,7 +1375,7 @@ function DiagramEditor() {
                 connectionState.toHandle.id,
               ),
               nodeManager,
-              edges,
+              edges.filter((edge) => edge.id !== reconnectingEdge.current),
             );
 
             if (!result.valid) {
@@ -1412,11 +1437,17 @@ function DiagramEditor() {
             );
           }
           setEditingNodeId(node.id);
-
           setEditOpFormPopoverProps({
             open: true,
             anchorReference: 'anchorPosition',
-            anchorPosition: { left: ev.clientX, top: ev.clientY },
+            anchorPosition: getEditPopoverPositionForNode({
+              nodeRect: ev.currentTarget.getBoundingClientRect(),
+              viewportWidth: window.innerWidth,
+              sidePanel: {
+                open: sidePanelOpen,
+                expanded: sidePanelExpanded,
+              },
+            }),
           });
         }}
         onEdgeClick={(ev, edge) => {
@@ -1430,6 +1461,7 @@ function DiagramEditor() {
           }
 
           setEditingEdgeId(edge.id);
+          setSelectedEdgeId(edge.id);
 
           setEditOpFormPopoverProps({
             open: true,
@@ -1437,7 +1469,13 @@ function DiagramEditor() {
             anchorPosition: { left: ev.clientX, top: ev.clientY },
           });
         }}
+        onEdgeMouseEnter={(_, edge) => setHoveredEdgeId(edge.id)}
+        onEdgeMouseLeave={() => setHoveredEdgeId(undefined)}
+        onSelectionChange={({ edges: selected }) =>
+          setSelectedEdgeId(selected[0]?.id)
+        }
         onPaneClick={(ev) => {
+          clearEdgeInspection();
           if (suppressNextPaneClick.current) {
             suppressNextPaneClick.current = false;
             return;
@@ -1475,7 +1513,15 @@ function DiagramEditor() {
             <Typography variant="h4">{editorMode.templateId}</Typography>
           </Panel>
         )}
-        <ConnectionHintPanel nodeManager={nodeManager} />
+        <ConnectionHintPanel
+          nodeManager={nodeManager}
+          reconnectingEdgeId={reconnectingEdgeId}
+          edgeResult={
+            inspectedEdgeId
+              ? compatibility.edgeResults.get(inspectedEdgeId)
+              : undefined
+          }
+        />
         <CommandPanel
           onNodeChanges={handleNodeChanges}
           onNewDiagram={handleNewDiagram}
@@ -1530,47 +1576,40 @@ function DiagramEditor() {
               sourceConnection={addOperationPopover.sourceConnection}
               onContentChange={updateAddOperationPopoverPosition}
               onAdd={({ changes, primaryNodeId }) => {
-                void (async () => {
-                  const targetNode =
-                    changes.find((change) => change.item.id === primaryNodeId)
-                      ?.item || null;
-                  if (!targetNode || !addOperationPopover.sourceConnection) {
-                    return;
-                  }
+                const targetNode =
+                  changes.find((change) => change.item.id === primaryNodeId)
+                    ?.item || null;
+                if (!targetNode || !addOperationPopover.sourceConnection) {
+                  return;
+                }
 
-                  const connection = createConnectionFromHandles(
-                    {
-                      nodeId: addOperationPopover.sourceConnection.sourceNodeId,
-                      id: addOperationPopover.sourceConnection.sourceHandle,
-                      type: addOperationPopover.sourceConnection
-                        .sourceHandleType,
-                    },
-                    targetNode.id,
-                    null,
-                  );
-                  const newEdge = await tryCreateCompatibleEdge(
-                    connection,
-                    undefined,
-                    changes,
-                  );
-                  if (!newEdge) {
-                    return;
-                  }
+                const connection = createConnectionFromHandles(
+                  {
+                    nodeId: addOperationPopover.sourceConnection.sourceNodeId,
+                    id: addOperationPopover.sourceConnection.sourceHandle,
+                    type: addOperationPopover.sourceConnection.sourceHandleType,
+                  },
+                  targetNode.id,
+                  null,
+                );
+                const newEdge = tryCreateEdge(connection, undefined, changes);
+                if (!newEdge) {
+                  return;
+                }
 
-                  handleNodeChanges(changes);
-                  setEdges((prev) => addEdge(newEdge, prev));
-                  closeAllPopovers();
-                  if (targetNode.type === 'script') {
-                    const environmentName = targetNode.data.op.environment;
-                    openScriptEnvironment(
-                      typeof environmentName === 'string'
-                        ? environmentName || undefined
-                        : undefined,
-                      true,
-                    );
-                    setPendingScriptEnvironmentNodeId(targetNode.id);
-                  }
-                })();
+                handleNodeChanges(changes);
+                setEdges((prev) => addEdge(newEdge, prev));
+                closeAllPopovers();
+                if (targetNode.type === 'script') {
+                  const environmentName = targetNode.data.op.environment;
+                  openScriptEnvironment(
+                    typeof environmentName === 'string'
+                      ? environmentName || undefined
+                      : undefined,
+                    true,
+                  );
+                  setPendingScriptEnvironmentNodeId(targetNode.id);
+                }
               }}
             />
           ) : (

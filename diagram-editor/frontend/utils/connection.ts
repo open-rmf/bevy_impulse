@@ -39,10 +39,10 @@ const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   node: ['default', 'streamOut'],
   scope: ['default', 'streamOut'],
   script: ['default', 'streamOut'],
-  section: ['section'],
+  section: ['section', 'buffer'],
   sectionInput: ['default'],
   sectionOutput: [],
-  sectionBuffer: ['buffer'],
+  sectionBuffer: ['default'],
   split: ['splitKey', 'splitSeq', 'splitRemaining'],
   start: ['default'],
   stream_out: [],
@@ -61,7 +61,7 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   node: [EdgeCategory.Data],
   scope: [EdgeCategory.Data],
   script: [EdgeCategory.Data],
-  section: [EdgeCategory.Data, EdgeCategory.Buffer],
+  section: [EdgeCategory.Data],
   sectionInput: [],
   sectionOutput: [EdgeCategory.Data],
   sectionBuffer: [],
@@ -114,6 +114,13 @@ export function getValidEdgeTypes(
   targetNode: DiagramEditorNode,
   targetHandle: string | null | undefined,
 ): EdgeTypes[] {
+  if (sourceNode.type === 'sectionBuffer') {
+    return !sourceHandle &&
+      !targetHandle &&
+      (targetNode.type === 'buffer' || targetNode.type === 'section')
+      ? ['default']
+      : [];
+  }
   let allowedOutputEdges: EdgeTypes[] =
     ALLOWED_OUTPUT_EDGES[sourceNode.type as NodeTypes];
   if (sourceHandle) {
@@ -411,6 +418,23 @@ export function validateConnectionSimple(
     return createValidationError('cannot find source or target node');
   }
 
+  if ('type' in conn) {
+    const slot = outputSlot(conn);
+    if (
+      slot !== undefined &&
+      edges.some(
+        (edge) =>
+          edge.id !== conn.id &&
+          edge.source === conn.source &&
+          outputSlot(edge) === slot,
+      )
+    ) {
+      return createValidationError(
+        'This output slot is already connected to another input',
+      );
+    }
+  }
+
   return validateSourceOutputCapacity(
     sourceNode,
     conn.sourceHandle,
@@ -419,30 +443,51 @@ export function validateConnectionSimple(
   );
 }
 
+function outputSlot(edge: DiagramEditorEdge): string | undefined {
+  switch (edge.type) {
+    case 'unzip':
+    case 'splitSeq':
+      return `${edge.type}:${edge.data.output.seq}`;
+    case 'splitKey':
+      return `splitKey:${edge.data.output.key}`;
+    case 'splitRemaining':
+    case 'forkResultOk':
+    case 'forkResultErr':
+      return edge.type;
+    case 'streamOut':
+      return edge.data.output.streamId
+        ? `streamOut:${edge.data.output.streamId}`
+        : undefined;
+    case 'section':
+      return edge.data.output.output
+        ? `section:${edge.data.output.output}`
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
 function nextBufferKey(
   sourceNode: DiagramEditorNode,
-  existingBuffers: Record<string, unknown>,
+  existingKeys: Set<string>,
 ): string {
   const baseKey = isOperationNode(sourceNode) ? sourceNode.data.opId : 'buffer';
-  if (!(baseKey in existingBuffers)) {
+  if (!existingKeys.has(baseKey)) {
     return baseKey;
   }
 
   let suffix = 1;
-  while (`${baseKey}_${suffix}` in existingBuffers) {
+  while (existingKeys.has(`${baseKey}_${suffix}`)) {
     suffix++;
   }
   return `${baseKey}_${suffix}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function adjustBufferEdgeInputForTarget(
   edge: DiagramEditorEdge,
   sourceNode: DiagramEditorNode,
   targetNode: DiagramEditorNode,
+  edges: DiagramEditorEdge[],
 ) {
   if (
     edge.type !== 'buffer' ||
@@ -454,13 +499,40 @@ function adjustBufferEdgeInputForTarget(
     return;
   }
 
-  const buffers = targetNode.data.op.buffers;
-  if (Array.isArray(buffers)) {
-    edge.data.input = { type: 'bufferSeq', seq: buffers.length };
-  } else if (isRecord(buffers)) {
+  const inputs = edges
+    .filter(
+      (existing) =>
+        existing.type === 'buffer' &&
+        existing.target === targetNode.id &&
+        existing.id !== edge.id,
+    )
+    .map((existing) => existing.data.input);
+  const keyed = inputs.length
+    ? inputs.some((input) => input.type === 'bufferKey')
+    : !Array.isArray(targetNode.data.op.buffers);
+  if (keyed) {
     edge.data.input = {
       type: 'bufferKey',
-      key: nextBufferKey(sourceNode, buffers),
+      key: nextBufferKey(
+        sourceNode,
+        new Set(
+          inputs.flatMap((input) =>
+            input.type === 'bufferKey' ? [input.key] : [],
+          ),
+        ),
+      ),
+    };
+  } else {
+    const used = new Set(
+      inputs.flatMap((input) =>
+        input.type === 'bufferSeq' ? [input.seq] : [],
+      ),
+    );
+    let seq = 0;
+    while (used.has(seq)) seq++;
+    edge.data.input = {
+      type: 'bufferSeq',
+      seq,
     };
   }
 }
@@ -468,6 +540,7 @@ function adjustBufferEdgeInputForTarget(
 export function createEdgeFromConnection(
   conn: Connection,
   nodeManager: NodeManager,
+  edges: DiagramEditorEdge[],
   id?: string,
 ): EdgeCreationResult {
   const sourceNode = nodeManager.tryGetNode(conn.source);
@@ -488,6 +561,34 @@ export function createEdgeFromConnection(
     );
   }
 
+  const previous = edges.find((edge) => edge.id === id);
+  const preserveOutput =
+    previous?.source === conn.source &&
+    (previous.sourceHandle || null) === (conn.sourceHandle || null);
+  const sourceEdges = edges.filter(
+    (edge) => edge.source === conn.source && edge.id !== id,
+  );
+  let edgeType =
+    previous && validEdges.includes(previous.type)
+      ? previous.type
+      : validEdges[0];
+  if (preserveOutput) {
+    if (!validEdges.includes(previous.type)) {
+      return createValidationError(
+        'The selected output cannot connect to this input',
+      );
+    }
+  } else if (
+    !(previous && validEdges.includes(previous.type)) &&
+    sourceNode.type === 'split' &&
+    !sourceEdges.some((edge) => edge.type === 'splitKey') &&
+    (sourceEdges.some((edge) => edge.type === 'splitSeq') ||
+      (sourceNode.data.op.sequential &&
+        !Object.keys(sourceNode.data.op.keyed ?? {}).length))
+  ) {
+    edgeType = 'splitSeq';
+  }
+
   const newEdge = {
     ...createBaseEdge(
       conn.source,
@@ -496,12 +597,38 @@ export function createEdgeFromConnection(
       conn.targetHandle,
       id,
     ),
-    type: validEdges[0],
-    data: defaultEdgeData(validEdges[0]),
+    type: edgeType,
+    data: defaultEdgeData(edgeType),
   } as DiagramEditorEdge;
 
+  if (preserveOutput) {
+    newEdge.data.output = { ...previous.data.output };
+  } else if (newEdge.type === 'unzip' || newEdge.type === 'splitSeq') {
+    const used = new Set(
+      sourceEdges.flatMap((edge) =>
+        edge.type === newEdge.type &&
+        (edge.type === 'unzip' || edge.type === 'splitSeq')
+          ? [edge.data.output.seq]
+          : [],
+      ),
+    );
+    let seq = 0;
+    while (used.has(seq)) seq++;
+    newEdge.data.output = { seq };
+  } else if (newEdge.type === 'splitKey') {
+    const used = new Set(
+      sourceEdges.flatMap((edge) =>
+        edge.type === 'splitKey' ? [edge.data.output.key] : [],
+      ),
+    );
+    let key = 'unnamed_key';
+    let suffix = 1;
+    while (used.has(key)) key = `unnamed_key_${suffix++}`;
+    newEdge.data.output = { key };
+  }
+
   if (targetNode.type === 'section') {
-    if (EDGE_CATEGORIES[newEdge.type] === EdgeCategory.Buffer) {
+    if (sourceNode.type === 'sectionBuffer') {
       newEdge.data.input = {
         type: 'sectionBuffer',
         inputId: '',
@@ -514,7 +641,18 @@ export function createEdgeFromConnection(
     }
   }
 
-  adjustBufferEdgeInputForTarget(newEdge, sourceNode, targetNode);
+  adjustBufferEdgeInputForTarget(newEdge, sourceNode, targetNode, edges);
+
+  if (
+    previous?.target === conn.target &&
+    (previous.targetHandle || null) === (conn.targetHandle || null) &&
+    EDGE_CATEGORIES[previous.type] === EDGE_CATEGORIES[newEdge.type] &&
+    (sourceNode.type !== 'sectionBuffer' ||
+      targetNode.type !== 'section' ||
+      previous.data.input.type === 'sectionBuffer')
+  ) {
+    newEdge.data.input = { ...previous.data.input };
+  }
 
   return { valid: true, edge: newEdge };
 }
@@ -523,7 +661,7 @@ export function createEdgeFromConnection(
  * Perform a simple check of the validity of edges.
  * Includes the checks in `validateEdgeQuick` and the following:
  *   * Check that the number of output edges does not exceed what the node allows.
- *     * Note that it does not check for conflicting edges, e.g. a `fork_result` with 2 "ok" edges is still valid.
+ *   * Reject conflicting output slots and buffer consumer selections.
  *
  * Complexity is O(numOfEdges).
  */
@@ -536,6 +674,14 @@ export function validateEdgeSimple(
   if (!quickCheck.valid) {
     return quickCheck;
   }
+  if (
+    (edge.type === 'unzip' || edge.type === 'splitSeq') &&
+    (!Number.isInteger(edge.data.output.seq) || edge.data.output.seq < 0)
+  ) {
+    return createValidationError(
+      'A sequential output index must be a non-negative integer',
+    );
+  }
 
   const sourceNode = nodeManager.tryGetNode(edge.source);
   const targetNode = nodeManager.tryGetNode(edge.target);
@@ -545,28 +691,87 @@ export function validateEdgeSimple(
 
   if (targetNode.type === 'section') {
     if (
-      EDGE_CATEGORIES[edge.type] === EdgeCategory.Buffer &&
+      edge.data.input.type !== 'sectionInput' &&
       edge.data.input.type !== 'sectionBuffer'
     ) {
       return createValidationError(
         'target is a section but there is no input slot',
       );
-    } else if (
-      EDGE_CATEGORIES[edge.type] === EdgeCategory.Data &&
-      edge.data.input.type !== 'sectionInput'
+    }
+    if (
+      sourceNode.type === 'sectionBuffer' &&
+      edge.data.input.type !== 'sectionBuffer'
     ) {
       return createValidationError(
-        'target is a section but there is no input slot',
+        'An exposed buffer must alias a buffer inside the section',
       );
     }
   }
 
-  const outputCapacity = validateSourceOutputCapacity(
-    sourceNode,
-    edge.sourceHandle,
-    edges,
-    edge.id,
-  );
+  if (edge.type === 'buffer') {
+    const input = edge.data.input;
+    if (input.type !== 'bufferKey' && input.type !== 'bufferSeq') {
+      return createValidationError(
+        'A buffer consumer needs a keyed or sequential buffer slot',
+      );
+    }
+    if (
+      input.type === 'bufferSeq' &&
+      (!Number.isInteger(input.seq) || input.seq < 0)
+    ) {
+      return createValidationError(
+        'A sequential buffer index must be a non-negative integer',
+      );
+    }
+    const sequentialSlots = new Map<number, number>();
+    if (input.type === 'bufferSeq') sequentialSlots.set(input.seq, 1);
+    for (const other of edges) {
+      if (
+        other.id === edge.id ||
+        other.type !== 'buffer' ||
+        other.target !== edge.target
+      )
+        continue;
+      if (other.data.input.type !== input.type) {
+        return createValidationError(
+          'Buffer connections to one consumer must use the same slot type',
+        );
+      }
+      if (
+        (input.type === 'bufferKey' &&
+          other.data.input.type === 'bufferKey' &&
+          input.key === other.data.input.key) ||
+        (input.type === 'bufferSeq' &&
+          other.data.input.type === 'bufferSeq' &&
+          input.seq === other.data.input.seq)
+      ) {
+        return createValidationError(
+          'This buffer input slot is already connected',
+        );
+      }
+      if (
+        other.data.input.type === 'bufferSeq' &&
+        validateEdgeQuick(other, nodeManager).valid &&
+        validateConnectionQuick(other, nodeManager).valid
+      ) {
+        const seq = other.data.input.seq;
+        sequentialSlots.set(seq, (sequentialSlots.get(seq) ?? 0) + 1);
+      }
+    }
+    if (input.type === 'bufferSeq') {
+      let firstMissing = 0;
+      // Duplicate or invalid earlier slots will be excluded from diagnostic
+      // export, so they cannot fill a gap in the serialized buffer selection.
+      while (sequentialSlots.get(firstMissing) === 1) firstMissing++;
+      if (input.seq > firstMissing) {
+        return createValidationError(
+          `Sequential buffer slot ${firstMissing} must be connected first`,
+        );
+      }
+    }
+  }
+
+  const outputCapacity = validateConnectionSimple(edge, nodeManager, edges);
   if (!outputCapacity.valid) {
     return outputCapacity;
   }

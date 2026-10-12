@@ -34,30 +34,24 @@
   background-color: var(--mui-palette-secondary-dark);
 }
 .react-flow__handle.handle-data-buffer {
-  background: linear-gradient(
-    -45deg,
-    var(--mui-palette-secondary-dark) 50%,
-    var(--xy-handle-background-color-default) 50%
-  );
-}
-.react-flow__handle.handle-data-stream {
-  background: linear-gradient(
-    -45deg,
-    var(--mui-palette-warning-dark) 50%,
-    var(--xy-handle-background-color-default) 50%
-  );
+  background-color: var(--mui-palette-secondary-main);
 }
 .react-flow__handle.connectionindicator {
   opacity: 1;
   border: 1px solid transparent;
   box-shadow: none;
 }
+.react-flow__handle.handle-data-stream {
+  width: 10px;
+  height: 10px;
+  background-color: var(--mui-palette-background-default);
+  border: 2px solid var(--mui-palette-warning-dark);
+}
 .react-flow__handle.handle-compatible {
   border: 1px solid var(--mui-palette-success-main);
   box-shadow: 0 0 0 4px rgb(76 175 80 / 22%);
 }
-.react-flow__handle.handle-compatible:hover,
-.react-flow__handle.valid {
+.react-flow__handle.handle-compatible:hover {
   box-shadow: 0 0 0 6px rgb(76 175 80 / 30%);
   border-color: var(--mui-palette-success-main);
 }
@@ -73,4 +67,8 @@
 }
 .react-flow__handle.connectingfrom {
   box-shadow: 0 0 0 6px rgb(33 150 243 / 18%);
+}
+.react-flow__edge.edge-incompatible .react-flow__edge-path {
+  stroke: var(--mui-palette-error-main);
+  filter: drop-shadow(0 0 3px rgb(244 67 54 / 60%));
 }

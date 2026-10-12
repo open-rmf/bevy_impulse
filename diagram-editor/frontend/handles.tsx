@@ -60,11 +60,9 @@ export function Handle({ id, variant, className, ...baseProps }: HandleProps) {
   const connection = useConnection();
   const handleType = baseProps.type || 'source';
   const compatibility = useDraggedConnectionCompatibility({
-    id: `handle:${nodeId ?? ''}:${handleType}:${id ?? ''}`,
     otherNodeId: nodeId,
     otherHandleId: id,
     otherHandleType: handleType,
-    skipSelf: true,
   });
 
   const classNames: string[] = [];
@@ -76,7 +74,11 @@ export function Handle({ id, variant, className, ...baseProps }: HandleProps) {
     classNames.push(className);
   }
 
-  if (compatibility && connection.inProgress) {
+  if (
+    compatibility &&
+    compatibility.status !== 'unknown' &&
+    connection.inProgress
+  ) {
     classNames.push(
       compatibility.status === 'compatible'
         ? 'handle-compatible'

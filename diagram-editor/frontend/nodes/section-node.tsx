@@ -76,7 +76,7 @@ export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
             type="source"
             position={Position.Bottom}
             isConnectable={props.isConnectable}
-            variant={HandleType.Data}
+            variant={HandleType.DataBuffer}
           />
         </>
       }

@@ -1,6 +1,6 @@
+import type { PopoverPosition } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { useDiagramSidePanel } from './diagram-side-panel-controller';
-import type { EditorAnchorPosition } from './diagram-side-panel-layout';
 import {
   constrainEditPopoverPosition,
   getDiagramSidePanelWidth,
@@ -33,8 +33,8 @@ export function useDiagramSidePanelWidth(): number {
 }
 
 export function useResponsiveEditPopoverPosition(
-  anchorPosition?: EditorAnchorPosition,
-): EditorAnchorPosition | undefined {
+  anchorPosition?: PopoverPosition,
+): PopoverPosition | undefined {
   const {
     state: { open, expanded },
   } = useDiagramSidePanel();

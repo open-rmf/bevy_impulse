@@ -8,6 +8,7 @@ function JoinNodeComp(props: NodeProps<OperationNode<'join'>>) {
   return (
     <BaseNode
       {...props}
+      compact
       icon={<JoinIcon />}
       label="Join"
       handles={

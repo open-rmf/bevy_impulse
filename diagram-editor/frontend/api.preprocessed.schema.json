@@ -184,11 +184,8 @@
         }
       ]
     },
-    "CompatibilityCandidate": {
+    "CompatibilityConnection": {
       "properties": {
-        "diagram": {
-          "$ref": "#/$defs/Diagram"
-        },
         "focusPorts": {
           "default": [],
           "items": {
@@ -221,22 +218,25 @@
         }
       },
       "required": [
-        "id",
-        "diagram"
+        "id"
       ],
       "type": "object"
     },
     "CompatibilityRequest": {
       "properties": {
-        "candidates": {
+        "connections": {
           "items": {
-            "$ref": "#/$defs/CompatibilityCandidate"
+            "$ref": "#/$defs/CompatibilityConnection"
           },
           "type": "array"
+        },
+        "diagram": {
+          "$ref": "#/$defs/Diagram"
         }
       },
       "required": [
-        "candidates"
+        "diagram",
+        "connections"
       ],
       "type": "object"
     },

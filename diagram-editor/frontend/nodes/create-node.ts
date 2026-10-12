@@ -130,7 +130,7 @@ export function createScopeNode(
         y: LAYOUT_OPTIONS.scopePadding.topBottom,
       },
       data: {
-        namespace: joinNamespaces(namespace, scopeId),
+        namespace: joinNamespaces(namespace, opId),
       },
       parentId: scopeId,
     },
@@ -142,7 +142,7 @@ export function createScopeNode(
         y: LAYOUT_OPTIONS.scopePadding.topBottom * 5,
       },
       data: {
-        namespace: joinNamespaces(namespace, scopeId),
+        namespace: joinNamespaces(namespace, opId),
       },
       parentId: scopeId,
     },

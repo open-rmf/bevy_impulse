@@ -39,9 +39,12 @@ export class ApiClient implements BaseApiClient {
   checkCompatibility(
     request: CompatibilityRequest,
   ): Observable<CompatibilityResponse> {
+    // Match REST JSON serialization, which omits undefined optional fields.
     return from(
       wasmApi.check_compatibility(
-        new wasmApi.CompatibilityRequestWasm(request),
+        new wasmApi.CompatibilityRequestWasm(
+          JSON.parse(JSON.stringify(request)),
+        ),
       ),
     );
   }

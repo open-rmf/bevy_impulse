@@ -498,10 +498,9 @@ export interface BufferSettings {
 }
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
- * via the `definition` "CompatibilityCandidate".
+ * via the `definition` "CompatibilityConnection".
  */
-export interface CompatibilityCandidate {
-  diagram: Diagram;
+export interface CompatibilityConnection {
   focusPorts?: PortRef[];
   id: string;
   sourcePort?: PortRef | null;
@@ -1446,7 +1445,8 @@ export interface NamedOutputRef {
  * via the `definition` "CompatibilityRequest".
  */
 export interface CompatibilityRequest {
-  candidates: CompatibilityCandidate[];
+  connections: CompatibilityConnection[];
+  diagram: Diagram;
   [k: string]: unknown;
 }
 /**

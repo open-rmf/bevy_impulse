@@ -13,7 +13,7 @@ export const DefaultEdgeComp = memo((props: DefaultEdgeCompProps) => {
     <StepEdge
       {...props}
       label={
-        props.data.input.type === 'sectionInput'
+        props.data.input.type !== 'default'
           ? props.data.input.inputId || 'Select Input'
           : undefined
       }

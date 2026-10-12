@@ -1,6 +1,7 @@
 import {
   constrainEditPopoverPosition,
   getDiagramSidePanelWidth,
+  getEditPopoverPositionForNode,
 } from './diagram-side-panel-layout';
 
 describe('diagram side-panel layout', () => {
@@ -67,5 +68,25 @@ describe('diagram side-panel layout', () => {
         sidePanel: { open: true, expanded: true },
       }),
     ).toEqual({ left: 16, top: 300 });
+  });
+
+  test('places the editor right of a node when it fits', () => {
+    expect(
+      getEditPopoverPositionForNode({
+        nodeRect: { left: 200, right: 242, top: 300 },
+        viewportWidth: 1440,
+        sidePanel: { open: false, expanded: false },
+      }),
+    ).toEqual({ left: 258, top: 300 });
+  });
+
+  test('flips the editor left of a node when the drawer leaves no room', () => {
+    expect(
+      getEditPopoverPositionForNode({
+        nodeRect: { left: 600, right: 642, top: 300 },
+        viewportWidth: 1440,
+        sidePanel: { open: true, expanded: true },
+      }),
+    ).toEqual({ left: 164, top: 300 });
   });
 });

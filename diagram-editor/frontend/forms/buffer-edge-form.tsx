@@ -56,27 +56,26 @@ export function BufferEdgeInputForm({
 }: BufferEdgeInputFormProps) {
   const labelId = useId();
   const nodeManager = useNodeManager();
-  const targetNode = nodeManager.tryGetNode(edge.target);
-  const targetIsSection = targetNode?.type === 'section';
+  const sourceNode = nodeManager.tryGetNode(edge.source);
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
 
   const sectionBuffers = useMemo(() => {
-    if (!targetNode || targetNode.type !== 'section') {
+    if (!sourceNode || sourceNode.type !== 'section') {
       return [];
     }
-    if (typeof targetNode.data.op.builder === 'string') {
-      const sectionRegistration = registry.sections[targetNode.data.op.builder];
+    if (typeof sourceNode.data.op.builder === 'string') {
+      const sectionRegistration = registry.sections[sourceNode.data.op.builder];
       return sectionRegistration
         ? Object.keys(sectionRegistration.interface.buffers)
         : [];
-    } else if (typeof targetNode.data.op.template === 'string') {
-      const template = templates[targetNode.data.op.template];
+    } else if (typeof sourceNode.data.op.template === 'string') {
+      const template = templates[sourceNode.data.op.template];
       return template ? getTemplateBuffers(template) : [];
     } else {
       return [];
     }
-  }, [targetNode, registry, templates]);
+  }, [sourceNode, registry, templates]);
 
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -89,7 +88,7 @@ export function BufferEdgeInputForm({
           id: edge.id,
           item: {
             ...edge,
-            data: { ...edge.data, input: { type: 'bufferKey', key: newKey } },
+            data: { ...edge.data, input: { ...edge.data.input, key: newKey } },
           },
         });
         break;
@@ -102,7 +101,10 @@ export function BufferEdgeInputForm({
             id: edge.id,
             item: {
               ...edge,
-              data: { ...edge.data, input: { type: 'bufferSeq', seq: newSeq } },
+              data: {
+                ...edge.data,
+                input: { ...edge.data.input, seq: newSeq },
+              },
             },
           });
         }
@@ -152,11 +154,8 @@ export function BufferEdgeInputForm({
             });
           }}
         >
-          {!targetIsSection && <MenuItem value="bufferSeq">Index</MenuItem>}
-          {!targetIsSection && <MenuItem value="bufferKey">Key</MenuItem>}
-          {targetIsSection && (
-            <MenuItem value="sectionBuffer">Section Buffer</MenuItem>
-          )}
+          <MenuItem value="bufferSeq">Index</MenuItem>
+          <MenuItem value="bufferKey">Key</MenuItem>
         </Select>
       </FormControl>
       {edge.data.input === undefined ||
@@ -177,12 +176,12 @@ export function BufferEdgeInputForm({
           fullWidth
         />
       )}
-      {edge.data.input.type === 'sectionBuffer' && (
+      {sourceNode?.type === 'section' && (
         <Autocomplete
           freeSolo
           autoSelect
           options={sectionBuffers}
-          value={edge.data.input.inputId}
+          value={edge.data.output.bufferId || ''}
           onChange={(_, value) => {
             onChange?.({
               type: 'replace',
@@ -190,8 +189,8 @@ export function BufferEdgeInputForm({
               item: {
                 ...edge,
                 data: {
-                  output: edge.data.output,
-                  input: { type: 'sectionBuffer', inputId: value || '' },
+                  output: { bufferId: value || '' },
+                  input: edge.data.input,
                 },
               } as BufferEdge,
             });

@@ -8,6 +8,7 @@ function UnzipNodeComp(props: NodeProps<OperationNode<'unzip'>>) {
   return (
     <BaseNode
       {...props}
+      compact
       icon={<UnzipIcon />}
       label="Unzip"
       handles={

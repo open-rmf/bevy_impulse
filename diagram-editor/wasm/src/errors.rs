@@ -1,5 +1,6 @@
 use axum::{body::to_bytes, http::header, response::IntoResponse};
 use mime_guess::mime;
+use serde::Serialize;
 use wasm_bindgen::JsValue;
 
 pub(super) trait IntoJsResult {
@@ -30,7 +31,7 @@ where
                         .map_err(|err| err.to_string())?;
                     let value: serde_json::Value =
                         serde_json::from_slice(&body).map_err(|err| err.to_string())?;
-                    Ok(serde_wasm_bindgen::to_value(&value)?)
+                    Ok(value.serialize(&serde_wasm_bindgen::Serializer::json_compatible())?)
                 } else {
                     Err(JsValue::from_str("response must be JSON"))
                 }

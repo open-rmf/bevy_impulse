@@ -153,7 +153,7 @@ impl BuildDiagramOperation for JoinSchema {
         id: &OperationName,
         ctx: &mut InferenceContext,
     ) -> Result<(), DiagramErrorCode> {
-        ctx.join(id, &self.buffers, &self.next, self.serialize)?;
+        ctx.join(id, &self.buffers, &self.next, self.serialize, &self.clone)?;
         Ok(())
     }
 

@@ -70,6 +70,7 @@ export function RunPanel({
     markInteractionFinished,
     markInteractionOperationFinished,
     markInteractionOperationStarted,
+    setWorkflowRunning,
   } = useInteractionVisualization();
   const [templates] = useTemplates();
   const registry = useRegistry();
@@ -85,6 +86,11 @@ export function RunPanel({
   > | null>(null);
   const interactionSubscriptionRef = useRef<Subscription | null>(null);
   const [diagramProperties] = useDiagramProperties();
+
+  useEffect(() => {
+    setWorkflowRunning(runningMode !== null);
+    return () => setWorkflowRunning(false);
+  }, [runningMode, setWorkflowRunning]);
 
   const closeInteractionSession = useCallback(() => {
     interactionSubscriptionRef.current?.unsubscribe();
