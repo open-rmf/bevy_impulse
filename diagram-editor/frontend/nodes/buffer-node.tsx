@@ -9,7 +9,7 @@ function BufferNodeComp(props: NodeProps<OperationNode<'buffer'>>) {
     <BaseNode
       {...props}
       icon={<BufferIcon />}
-      label={props.data.op.display_text || 'Buffer'}
+      label={props.data.op.display_text || props.data.opId || ''}
       cylinder
       handles={
         <>
