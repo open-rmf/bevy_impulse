@@ -38,7 +38,7 @@ test('buffer labels can be edited and cleared without renaming the operation', (
   );
 
   fireEvent.change(label, { target: { value: '' } });
-  expect(screen.getByTitle('Buffer')).toBeVisible();
+  expect(screen.getByTitle('temperature')).toBeVisible();
   expect(screen.getByRole('textbox', { name: /^id/ })).toHaveValue(
     'temperature',
   );
