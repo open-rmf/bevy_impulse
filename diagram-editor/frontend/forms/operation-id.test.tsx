@@ -63,11 +63,10 @@ function Editor({ script = false }: { script?: boolean }) {
 test('manual IDs survive builder edits; clearing the field restores automatic naming', () => {
   render(<Editor />);
   const id = screen.getByRole('textbox', { name: /^id/ });
-  expect(id).toHaveValue('');
-  expect(id).toHaveAttribute(
-    'placeholder',
-    expect.stringMatching(/^node_add_[A-Z0-9]{6}$/),
-  );
+  expect(id).toHaveValue(screen.getByRole('status').textContent);
+  expect(
+    screen.queryByText('Leave blank to generate an ID automatically.'),
+  ).not.toBeInTheDocument();
   fireEvent.change(id, { target: { value: 'my_addition' } });
   const builder = screen.getByRole('combobox', { name: /Builder/ });
   fireEvent.change(builder, { target: { value: 'subtract' } });
@@ -77,11 +76,13 @@ test('manual IDs survive builder edits; clearing the field restores automatic na
   expect(screen.getByRole('status').textContent).toMatch(
     /^node_subtract_[A-Z0-9]{6}$/,
   );
+  expect(id).toHaveValue(screen.getByRole('status').textContent);
   fireEvent.change(builder, { target: { value: 'multiply' } });
   fireEvent.blur(builder);
   expect(screen.getByRole('status').textContent).toMatch(
     /^node_multiply_[A-Z0-9]{6}$/,
   );
+  expect(id).toHaveValue(screen.getByRole('status').textContent);
 });
 
 test('script IDs follow the entrypoint while manual IDs stay fixed', () => {

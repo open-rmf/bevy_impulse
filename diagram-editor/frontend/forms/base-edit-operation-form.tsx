@@ -43,13 +43,7 @@ function BaseEditOperationForm({
           <TextField
             label="id"
             fullWidth
-            value={
-              node.data.op.extensions?.['crossflow-auto-id'] === true
-                ? ''
-                : node.data.opId
-            }
-            placeholder={node.data.opId}
-            helperText="Leave blank to generate an ID automatically."
+            value={node.data.opId}
             onChange={(ev) => {
               const updatedNode = {
                 ...node,
