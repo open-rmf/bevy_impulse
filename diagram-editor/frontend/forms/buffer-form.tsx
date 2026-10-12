@@ -90,6 +90,24 @@ function BufferForm(props: BufferFormProps) {
 
   return (
     <BaseEditOperationForm {...props}>
+      <TextField
+        label="Display Text"
+        value={op.display_text || ''}
+        helperText="Changes the label only; the operation ID stays the same."
+        onChange={(ev) => {
+          onChange?.({
+            type: 'replace',
+            id: node.id,
+            item: {
+              ...node,
+              data: {
+                ...node.data,
+                op: { ...op, display_text: ev.target.value || undefined },
+              },
+            },
+          });
+        }}
+      />
       <Stack direction="row" spacing={2} minWidth={300}>
         <FormControl fullWidth>
           <InputLabel id={retentionLabelId}>Retention Policy</InputLabel>

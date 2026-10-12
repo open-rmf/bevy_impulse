@@ -22,6 +22,7 @@ export interface BaseNodeProps extends NodeProps {
   handles?: JSX.Element;
   highlight?: boolean;
   compact?: boolean;
+  cylinder?: boolean;
 }
 
 function BaseNode({
@@ -34,6 +35,7 @@ function BaseNode({
   id,
   highlight,
   compact,
+  cylinder,
 }: BaseNodeProps) {
   const { activeNodeIds, visitedNodeIds } = useInteractionVisualization();
   const interactionActive = activeNodeIds.has(id);
@@ -45,10 +47,12 @@ function BaseNode({
       materialIconOrSymbol
     );
 
+  const borderRadius = compact ? '50%' : cylinder ? '50% / 8px' : undefined;
+
   return (
     <Paper
       sx={(theme) => ({
-        borderRadius: compact ? '50%' : undefined,
+        borderRadius,
         outline: interactionActive
           ? `2px solid ${theme.palette.success.main}`
           : interactionVisited
@@ -81,6 +85,21 @@ function BaseNode({
         variant={selected ? 'contained' : 'outlined'}
         sx={{
           textTransform: 'none',
+          ...(cylinder && {
+            borderRadius,
+            paddingTop: '16px',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '14px',
+              borderBottom: '1px solid currentColor',
+              borderRadius: '50%',
+              pointerEvents: 'none',
+            },
+          }),
           ...(compact
             ? {
                 width: CompactNodeSize,
@@ -90,15 +109,15 @@ function BaseNode({
                 padding: 0,
               }
             : {
-                width: LAYOUT_OPTIONS.nodeWidth,
-                height: LAYOUT_OPTIONS.nodeHeight,
+                width: cylinder ? 150 : LAYOUT_OPTIONS.nodeWidth,
+                height: cylinder ? 44 : LAYOUT_OPTIONS.nodeHeight,
               }),
         }}
       >
         {compact ? (
           icon
         ) : (
-          <Stack>
+          <Stack sx={{ minWidth: 0 }}>
             <Box
               component="span"
               sx={{
