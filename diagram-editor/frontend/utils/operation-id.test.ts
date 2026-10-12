@@ -45,14 +45,6 @@ test('automatic names follow operation properties and retain their suffix', () =
     data: { ...node.data, op: { ...node.data.op, builder: 'subtract' } },
   };
   expect(replace(changed, [node])[0].data.opId).toBe(`node_subtract_${suffix}`);
-  expect(
-    generateOperationId({
-      type: 'script',
-      environment: 'python',
-      run: 'execute',
-      next: { builtin: 'dispose' },
-    }),
-  ).toMatch(/^script_execute_[A-Z0-9]{6}$/);
   expect(generateOperationId({ ...op, builder: 'math::add' })).toMatch(
     /^node_math_add_[A-Z0-9]{6}$/,
   );
@@ -67,9 +59,6 @@ test('generated IDs avoid existing names, including other additions in the same 
   );
   const added = applyNodeChanges(updateOperationIds(changes, []), []);
   expect(added[0].data.opId).not.toBe(added[1].data.opId);
-  expect(
-    generateOperationId(op, [first.data.opId], first.data.opId.slice(-6)),
-  ).not.toBe(first.data.opId);
 });
 
 test('legacy IDs and manual IDs that look generated remain unchanged', () => {

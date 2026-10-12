@@ -246,7 +246,7 @@ function getInteractionNodeId(
 ): string | null {
   const normalizedId = (
     operationId.startsWith(':') ? operationId.slice(1) : operationId
-  ).replace(/\(terminate\)$/, TERMINATE_ID);
+  ).replace(/(^|:)\(terminate\)$/, `$1${TERMINATE_ID}`);
 
   if (normalizedId.startsWith('(') || normalizedId.includes(':(exposed):')) {
     return null;

@@ -9,7 +9,6 @@ import {
   DiagramSidePanelProvider,
   useDiagramSidePanel,
 } from './diagram-side-panel-controller';
-
 import { getDiagramSidePanelWidth } from './diagram-side-panel-layout';
 
 function Harness() {

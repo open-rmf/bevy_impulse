@@ -7,7 +7,7 @@ import {
   TextField,
 } from '@mui/material';
 import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
-import type React from 'react';
+import { type PropsWithChildren, useState } from 'react';
 import type { OperationNode, OperationNodeTypes } from '../nodes';
 import { MaterialSymbol } from '../nodes';
 
@@ -24,7 +24,29 @@ function BaseEditOperationForm({
   onChange,
   onDelete,
   children,
-}: React.PropsWithChildren<BaseEditOperationFormProps>) {
+}: PropsWithChildren<BaseEditOperationFormProps>) {
+  const [idCleared, setIdCleared] = useState(false);
+  const automatic = node.data.op.extensions?.['crossflow-auto-id'] === true;
+  const updateId = (opId: string) => {
+    onChange?.({
+      type: 'replace',
+      id: node.id,
+      item: {
+        ...node,
+        data: {
+          ...node.data,
+          opId,
+          op: {
+            ...node.data.op,
+            extensions: {
+              ...node.data.op.extensions,
+              'crossflow-auto-id': opId === '',
+            },
+          },
+        },
+      },
+    });
+  };
   return (
     <Card>
       <CardHeader
@@ -43,27 +65,20 @@ function BaseEditOperationForm({
           <TextField
             label="id"
             fullWidth
-            value={node.data.opId}
+            value={idCleared ? '' : node.data.opId}
+            sx={{
+              '& input': {
+                color: automatic ? 'text.secondary' : 'text.primary',
+              },
+            }}
             onChange={(ev) => {
-              const updatedNode = {
-                ...node,
-                data: {
-                  ...node.data,
-                  opId: ev.target.value,
-                  op: {
-                    ...node.data.op,
-                    extensions: {
-                      ...node.data.op.extensions,
-                      'crossflow-auto-id': ev.target.value === '',
-                    },
-                  },
-                },
-              };
-              onChange?.({
-                type: 'replace',
-                id: node.id,
-                item: updatedNode,
-              });
+              const value = ev.target.value;
+              setIdCleared(value === '');
+              if (value !== '') updateId(value);
+            }}
+            onBlur={() => {
+              if (idCleared && !automatic) updateId('');
+              setIdCleared(false);
             }}
           />
           {children}
