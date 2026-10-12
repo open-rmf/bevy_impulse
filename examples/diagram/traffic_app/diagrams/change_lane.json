@@ -1,0 +1,132 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "5ca9f3b6-55ea-40ba-8fa5-4ed1a8bb15ae",
+  "ops": {
+    "5ca9f3b6-55ea-40ba-8fa5-4ed1a8bb15ae": {
+      "type": "fork_clone",
+      "next": [
+        "8d908830-732d-41ad-807c-d4fc189a0ebf",
+        "588f1e78-aa95-4332-8a8a-8b4e2c483d0e",
+        "fc3591e6-ea1a-402e-af75-99a0fcc39b09"
+      ]
+    },
+    "8d908830-732d-41ad-807c-d4fc189a0ebf": {
+      "type": "buffer_access",
+      "buffers": {
+        "stop_request": "2f320ce3-ca19-44df-bef5-829771ac88b0"
+      },
+      "next": "3e765b14-fb66-4479-aa35-1dde72970d5e"
+    },
+    "3e765b14-fb66-4479-aa35-1dde72970d5e": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "execute",
+      "next": "6687fa6b-f6cc-4b0f-acef-cb66540d6e53",
+      "stream_out": {
+        "speed": "35a602fb-9b93-4d15-9181-e643f674c007",
+        "target": "fb58bdd3-c9b5-47f8-903d-c0c979076764"
+      }
+    },
+    "6687fa6b-f6cc-4b0f-acef-cb66540d6e53": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "stop",
+      "next": {
+        "builtin": "terminate"
+      },
+      "display_text": "stop",
+      "stream_out": {
+        "speed": "35a602fb-9b93-4d15-9181-e643f674c007"
+      }
+    },
+    "35a602fb-9b93-4d15-9181-e643f674c007": {
+      "type": "node",
+      "builder": "set_throttle",
+      "next": "ad83b9e9-ed55-4f21-b025-5ddfe64de0ec"
+    },
+    "ad83b9e9-ed55-4f21-b025-5ddfe64de0ec": {
+      "type": "fork_result",
+      "err": {
+        "builtin": "terminate"
+      },
+      "ok": {
+        "builtin": "dispose"
+      }
+    },
+    "fb58bdd3-c9b5-47f8-903d-c0c979076764": {
+      "type": "buffer"
+    },
+    "588f1e78-aa95-4332-8a8a-8b4e2c483d0e": {
+      "type": "transform",
+      "cel": "null",
+      "next": "cb6b3a6d-45f9-4184-ac33-b415484c6642"
+    },
+    "cb6b3a6d-45f9-4184-ac33-b415484c6642": {
+      "type": "buffer_access",
+      "buffers": [
+        "fb58bdd3-c9b5-47f8-903d-c0c979076764"
+      ],
+      "next": "6f4a2799-91ed-4641-86bd-886273f77689"
+    },
+    "6f4a2799-91ed-4641-86bd-886273f77689": {
+      "type": "node",
+      "builder": "lane_controller",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "steer": "4a64e839-ebd6-4055-9179-b392c85def2d"
+      }
+    },
+    "4a64e839-ebd6-4055-9179-b392c85def2d": {
+      "type": "node",
+      "builder": "steer",
+      "next": "d8b462b2-68c1-4fc0-9996-96555d0b6414"
+    },
+    "d8b462b2-68c1-4fc0-9996-96555d0b6414": {
+      "type": "fork_result",
+      "err": {
+        "builtin": "terminate"
+      },
+      "ok": {
+        "builtin": "dispose"
+      }
+    },
+    "fc3591e6-ea1a-402e-af75-99a0fcc39b09": {
+      "type": "transform",
+      "cel": "null",
+      "next": "a32d3050-c361-4b8f-b35a-9519e072ac15"
+    },
+    "a32d3050-c361-4b8f-b35a-9519e072ac15": {
+      "type": "node",
+      "builder": "detect_stop_request",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "stop": "2f320ce3-ca19-44df-bef5-829771ac88b0"
+      }
+    },
+    "2f320ce3-ca19-44df-bef5-829771ac88b0": {
+      "type": "buffer"
+    }
+  },
+  "description": "Drive forward at 20 km/h, changing lanes every 8 seconds. A Python script decides which lane to drive in and streams the target position into a buffer, while the lane_controller node continuously steers toward it. Runs for 30 seconds unless you input a different duration (in seconds). Press the simulator's Send stop request button to end the trip early.",
+  "input_examples": [
+    {
+      "description": "Run for 60 seconds.",
+      "value": "60"
+    }
+  ],
+  "script_environments": {
+    "scripts": {
+      "builder": "process-bound-python",
+      "config": {
+        "ownership": "shared",
+        "script": "import asyncio\nfrom crossflow import *\n\nasync def execute(input: Input):\n    stop_request = input.accessors['stop_request'].fetch_by_clone()\n\n    duration = input.data\n    if duration is None:\n        duration = 30.0\n\n    # x coordinates (in meters) of the two lane centers\n    left_lane = -9.0\n    right_lane = -3.0\n\n    input.stream_out('speed', 20)\n\n    dt = 0.1\n    t = 0.0\n    while t < duration:\n        t += dt\n\n        # End the trip early when the user sends a stop request\n        if await stop_request.try_fetch() is not None:\n            print('Stop requested by user, ending the trip early')\n            break\n\n        # Change lanes every 8 seconds\n        if int(t / 8.0) % 2 == 0:\n            input.stream_out('target', left_lane)\n        else:\n            input.stream_out('target', right_lane)\n        await asyncio.sleep(dt)\n\ndef stop(input: Input):\n    input.stream_out('speed', 0)\n"
+      }
+    }
+  }
+}

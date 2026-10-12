@@ -1,0 +1,942 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "53642a5a-568d-46af-b068-9b55290c9514",
+  "ops": {
+    "3c7d6bff-6aef-448b-b034-43a2de1540cf": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "execute",
+      "next": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+      "stream_out": {
+        "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+      }
+    },
+    "e99ffc89-4d3f-4d26-a5c3-819cf1209092": {
+      "type": "node",
+      "builder": "set_throttle",
+      "next": "cfd1dc8c-6949-4049-9b47-2811b05f730c"
+    },
+    "cfd1dc8c-6949-4049-9b47-2811b05f730c": {
+      "type": "fork_result",
+      "err": {
+        "builtin": "terminate"
+      },
+      "ok": {
+        "builtin": "dispose"
+      }
+    },
+    "1a223192-94d1-4bed-a972-79e71e28fd10": {
+      "type": "node",
+      "builder": "detect_traffic_signal",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "traffic_signal": "73ab1393-a4a8-490e-9518-ae02b2acf6cc"
+      }
+    },
+    "53642a5a-568d-46af-b068-9b55290c9514": {
+      "type": "fork_clone",
+      "next": [
+        "1799aad6-e0c0-4c8f-932e-add884124171",
+        "0a1633d8-7912-4925-a2a3-3f84c8b95e8d",
+        "cbef12cb-481e-4527-ac87-bffa6964a927",
+        "083ca00f-c15d-43da-8f61-8709277eb6f8"
+      ]
+    },
+    "73ab1393-a4a8-490e-9518-ae02b2acf6cc": {
+      "type": "buffer"
+    },
+    "1799aad6-e0c0-4c8f-932e-add884124171": {
+      "type": "buffer_access",
+      "buffers": {
+        "stoplight": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+        "obstacles": "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10",
+        "stop_request": "161d4df9-69bc-4f81-9dfb-c40922fcf79c"
+      },
+      "next": "3c7d6bff-6aef-448b-b034-43a2de1540cf"
+    },
+    "f7f53702-2df4-48e2-91c4-f0859a0d27d4": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "stop",
+      "next": {
+        "builtin": "terminate"
+      },
+      "display_text": "stop",
+      "stream_out": {
+        "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+      }
+    },
+    "2dd3384a-2898-4156-8771-60a1fe06251b": {
+      "type": "node",
+      "builder": "detect_obstacles",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "obstacles": "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10"
+      }
+    },
+    "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10": {
+      "type": "buffer"
+    },
+    "0a1633d8-7912-4925-a2a3-3f84c8b95e8d": {
+      "type": "transform",
+      "cel": "null",
+      "next": "1a223192-94d1-4bed-a972-79e71e28fd10"
+    },
+    "cbef12cb-481e-4527-ac87-bffa6964a927": {
+      "type": "transform",
+      "cel": "null",
+      "next": "2dd3384a-2898-4156-8771-60a1fe06251b"
+    },
+    "083ca00f-c15d-43da-8f61-8709277eb6f8": {
+      "type": "transform",
+      "cel": "null",
+      "next": "5b7ae2fc-7f08-44db-ad30-1d70190e408e"
+    },
+    "5b7ae2fc-7f08-44db-ad30-1d70190e408e": {
+      "type": "node",
+      "builder": "detect_stop_request",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "stop": "161d4df9-69bc-4f81-9dfb-c40922fcf79c"
+      }
+    },
+    "161d4df9-69bc-4f81-9dfb-c40922fcf79c": {
+      "type": "buffer"
+    }
+  },
+  "description": "Drive forward, avoiding any obstacles and stopping for traffic lights along the way. Runs for 10 seconds unless you input a different duration (in seconds). Press the simulator's Send stop request button to end the trip early.",
+  "input_examples": [
+    {
+      "description": "Run this workflow for 30 seconds",
+      "value": "30"
+    }
+  ],
+  "script_environments": {
+    "scripts": {
+      "builder": "process-bound-python",
+      "config": {
+        "ownership": "shared",
+        "script": "import asyncio\nfrom crossflow import *\n\nasync def execute(input: Input):\n    stoplight = input.accessors['stoplight'].fetch_by_clone()\n    obstacles = input.accessors['obstacles'].fetch_by_clone()\n    stop_request = input.accessors['stop_request'].fetch_by_clone()\n    duration = input.data\n    if duration is None:\n        duration = 10.0\n\n    previously_stopped = False\n    dt = 0.1\n    t = 0.0\n    while t < duration:\n        t += dt\n\n        # End the trip early when the user sends a stop request\n        if await stop_request.try_fetch() is not None:\n            print('Stop requested by user, ending the trip early')\n            break\n        light = await stoplight.try_fetch()\n\n        stop = False\n        if light == 'red':\n            # Stop if we a see a red light\n            stop = True\n            if not previously_stopped:\n                print('Stopping for a red light')\n\n        if not stop:\n            current_obstacles = await obstacles.try_fetch()\n            if current_obstacles is not None:\n                for obs in current_obstacles:\n                    if abs(obs['x']) < 2.0:\n                        # Stop if an obstacle is in front of us\n                        stop = True\n                        if not previously_stopped:\n                            print('Stopping for an obstacle')\n                        break\n\n        if stop:\n            previously_stopped = True\n            stop = {\n                'target_speed': 0,\n                'max_acceleration': 100\n            }\n            input.stream_out('speed', stop)\n        else:\n            previously_stopped = False\n            input.stream_out('speed', 30)\n        await asyncio.sleep(dt)\n\ndef print_messages(input: Input):\n    print(f'Traffic signal: {input.data}')\n\ndef stop(input: Input):\n    input.stream_out('speed', 0)"
+      }
+    }
+  },
+  "extensions": {
+    "crossflow-diagram-editor-v1": {
+      "hash": "5706a0853c27fc1de471a83fe53dea3934540f3b",
+      "state": {
+        "nodes": [
+          {
+            "id": ":__builtin_start__",
+            "type": "start",
+            "position": {
+              "x": 167.5,
+              "y": 25
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": ":__builtin_terminate__",
+            "type": "terminate",
+            "position": {
+              "x": 167.5,
+              "y": 1025
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "3737496e-d184-466f-b03d-8e019df39c33",
+            "type": "script",
+            "position": {
+              "x": 167.5,
+              "y": 625
+            },
+            "data": {
+              "namespace": "",
+              "opId": "3c7d6bff-6aef-448b-b034-43a2de1540cf",
+              "op": {
+                "type": "script",
+                "environment": "scripts",
+                "run": "execute",
+                "next": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+                "stream_out": {
+                  "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "type": "node",
+            "position": {
+              "x": 486.55143688449004,
+              "y": 792.5227018106879
+            },
+            "data": {
+              "namespace": "",
+              "opId": "e99ffc89-4d3f-4d26-a5c3-819cf1209092",
+              "op": {
+                "type": "node",
+                "builder": "set_throttle",
+                "next": "cfd1dc8c-6949-4049-9b47-2811b05f730c"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "type": "fork_result",
+            "position": {
+              "x": 486.55143688449004,
+              "y": 886.6177385035403
+            },
+            "data": {
+              "namespace": "",
+              "opId": "cfd1dc8c-6949-4049-9b47-2811b05f730c",
+              "op": {
+                "type": "fork_result",
+                "err": {
+                  "builtin": "terminate"
+                },
+                "ok": {
+                  "builtin": "dispose"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "type": "node",
+            "position": {
+              "x": -132.0000000000001,
+              "y": 319.5
+            },
+            "data": {
+              "namespace": "",
+              "opId": "1a223192-94d1-4bed-a972-79e71e28fd10",
+              "op": {
+                "type": "node",
+                "builder": "detect_traffic_signal",
+                "next": {
+                  "builtin": "dispose"
+                },
+                "stream_out": {
+                  "traffic_signal": "73ab1393-a4a8-490e-9518-ae02b2acf6cc"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "type": "fork_clone",
+            "position": {
+              "x": 167.5,
+              "y": 125
+            },
+            "data": {
+              "namespace": "",
+              "opId": "53642a5a-568d-46af-b068-9b55290c9514",
+              "op": {
+                "type": "fork_clone",
+                "next": [
+                  "1799aad6-e0c0-4c8f-932e-add884124171",
+                  "0a1633d8-7912-4925-a2a3-3f84c8b95e8d",
+                  "cbef12cb-481e-4527-ac87-bffa6964a927",
+                  "083ca00f-c15d-43da-8f61-8709277eb6f8"
+                ]
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "type": "buffer",
+            "position": {
+              "x": -131.76307600379525,
+              "y": 422.73635225411147
+            },
+            "data": {
+              "namespace": "",
+              "opId": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "type": "buffer_access",
+            "position": {
+              "x": 167.5,
+              "y": 525
+            },
+            "data": {
+              "namespace": "",
+              "opId": "1799aad6-e0c0-4c8f-932e-add884124171",
+              "op": {
+                "type": "buffer_access",
+                "buffers": {
+                  "stoplight": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+                  "obstacles": "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10",
+                  "stop_request": "161d4df9-69bc-4f81-9dfb-c40922fcf79c"
+                },
+                "next": "3c7d6bff-6aef-448b-b034-43a2de1540cf"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "type": "script",
+            "position": {
+              "x": 167.31658170148324,
+              "y": 722.0475183464262
+            },
+            "data": {
+              "namespace": "",
+              "opId": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+              "op": {
+                "type": "script",
+                "environment": "scripts",
+                "run": "stop",
+                "next": {
+                  "builtin": "terminate"
+                },
+                "display_text": "stop",
+                "stream_out": {
+                  "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "b1cdabbf-9469-40fc-a0c1-05baceb34abf",
+            "type": "node",
+            "position": {
+              "x": 417.5,
+              "y": 325
+            },
+            "data": {
+              "namespace": "",
+              "opId": "2dd3384a-2898-4156-8771-60a1fe06251b",
+              "op": {
+                "type": "node",
+                "builder": "detect_obstacles",
+                "next": {
+                  "builtin": "dispose"
+                },
+                "stream_out": {
+                  "obstacles": "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "51413388-cc11-4946-9f1e-478c84d74e16",
+            "type": "buffer",
+            "position": {
+              "x": 417.5,
+              "y": 425
+            },
+            "data": {
+              "namespace": "",
+              "opId": "ebdee582-8c2f-40b5-a0f7-7bc22e93cc10",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "cdd8234d-1587-44fc-a732-cdfa2f81d102",
+            "type": "transform",
+            "position": {
+              "x": -132.0000000000001,
+              "y": 225.5
+            },
+            "data": {
+              "namespace": "",
+              "opId": "0a1633d8-7912-4925-a2a3-3f84c8b95e8d",
+              "op": {
+                "type": "transform",
+                "cel": "null",
+                "next": "1a223192-94d1-4bed-a972-79e71e28fd10"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "7c0f8f55-a335-4aa2-9999-2daefaf58fcf",
+            "type": "transform",
+            "position": {
+              "x": 417.5,
+              "y": 225
+            },
+            "data": {
+              "namespace": "",
+              "opId": "cbef12cb-481e-4527-ac87-bffa6964a927",
+              "op": {
+                "type": "transform",
+                "cel": "null",
+                "next": "2dd3384a-2898-4156-8771-60a1fe06251b"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "8d7bde00-9ce0-4a29-acf8-5df15fd54c9c",
+            "type": "transform",
+            "position": {
+              "x": 700,
+              "y": 225
+            },
+            "data": {
+              "namespace": "",
+              "opId": "083ca00f-c15d-43da-8f61-8709277eb6f8",
+              "op": {
+                "type": "transform",
+                "cel": "null",
+                "next": "5b7ae2fc-7f08-44db-ad30-1d70190e408e"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "eef02d50-04da-48f5-9915-2ef9b369f42b",
+            "type": "node",
+            "position": {
+              "x": 700,
+              "y": 320
+            },
+            "data": {
+              "namespace": "",
+              "opId": "5b7ae2fc-7f08-44db-ad30-1d70190e408e",
+              "op": {
+                "type": "node",
+                "builder": "detect_stop_request",
+                "next": {
+                  "builtin": "dispose"
+                },
+                "stream_out": {
+                  "stop": "161d4df9-69bc-4f81-9dfb-c40922fcf79c"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "08a0c2cb-bc0a-4248-9ceb-90c07cf4bb84",
+            "type": "buffer",
+            "position": {
+              "x": 700,
+              "y": 420
+            },
+            "data": {
+              "namespace": "",
+              "opId": "161d4df9-69bc-4f81-9dfb-c40922fcf79c",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "145f9968-5329-4234-a1f4-d6f8814deb1d",
+            "source": "3737496e-d184-466f-b03d-8e019df39c33",
+            "sourceHandle": "dataStream",
+            "target": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "speed"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "76b5267d-93d0-416c-9fc2-e7356ba9a2ea",
+            "source": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "target": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "020da698-b9e7-441a-ac0f-d56c1cbf6b7f",
+            "source": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "sourceHandle": "forkResultErr",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "forkResultErr",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "75db870c-9a4d-46d4-bde2-6a1d8e84280e",
+            "source": ":__builtin_start__",
+            "target": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "67b1a28c-1a18-46cc-b730-2fd511e17b4b",
+            "source": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "sourceHandle": "dataStream",
+            "target": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "traffic_signal"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "42a4cdb2-ac5c-4842-82a1-ae9d481cc9ea",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "3f252318-95a9-42e1-89f4-e574de848401",
+            "source": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferKey",
+                "key": "stoplight"
+              }
+            },
+            "style": {},
+            "selected": false
+          },
+          {
+            "id": "9c8447ba-2b1e-4eb3-836b-193767475d7f",
+            "source": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "target": "3737496e-d184-466f-b03d-8e019df39c33",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "6260a708-c936-4384-b8ba-d0212ff6964a",
+            "source": "3737496e-d184-466f-b03d-8e019df39c33",
+            "target": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "9e7036bd-12a5-4777-b660-4c458cfebbdf",
+            "source": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "7c4e07b4-55d0-470e-8e2e-5bc6a173009e",
+            "source": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "sourceHandle": "dataStream",
+            "target": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "speed"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "155be5b7-6e40-4b02-b862-75b92da78d00",
+            "source": "b1cdabbf-9469-40fc-a0c1-05baceb34abf",
+            "sourceHandle": "dataStream",
+            "target": "51413388-cc11-4946-9f1e-478c84d74e16",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "obstacles"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "dede9873-44e0-4124-a6d6-822dbc9435b6",
+            "source": "51413388-cc11-4946-9f1e-478c84d74e16",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferKey",
+                "key": "obstacles"
+              }
+            },
+            "style": {},
+            "selected": false
+          },
+          {
+            "id": "89b018ca-8647-4534-aebf-9ef313e92735",
+            "source": "cdd8234d-1587-44fc-a732-cdfa2f81d102",
+            "target": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "5912d753-7135-4aff-943d-d8b75b85ec3b",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "cdd8234d-1587-44fc-a732-cdfa2f81d102",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "44abe620-b8ed-4df2-a521-002b8e69c78a",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "7c0f8f55-a335-4aa2-9999-2daefaf58fcf",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "f5471661-c2d8-4314-a2c3-b641a8551934",
+            "source": "7c0f8f55-a335-4aa2-9999-2daefaf58fcf",
+            "target": "b1cdabbf-9469-40fc-a0c1-05baceb34abf",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "2a10360b-c5f5-49ca-81cb-f429da21ff47",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "8d7bde00-9ce0-4a29-acf8-5df15fd54c9c",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "3d379739-3e90-408d-8de5-cf3b3d8af451",
+            "source": "8d7bde00-9ce0-4a29-acf8-5df15fd54c9c",
+            "target": "eef02d50-04da-48f5-9915-2ef9b369f42b",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "e3fc415b-dc0f-4b52-8b23-5c2687e3c159",
+            "source": "eef02d50-04da-48f5-9915-2ef9b369f42b",
+            "target": "08a0c2cb-bc0a-4248-9ceb-90c07cf4bb84",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "stop"
+              },
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "176bc853-2558-4d69-90e0-32de980c9ca8",
+            "source": "08a0c2cb-bc0a-4248-9ceb-90c07cf4bb84",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferKey",
+                "key": "stop_request"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

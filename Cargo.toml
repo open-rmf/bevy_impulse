@@ -33,6 +33,7 @@ features = ["maximal"]
 [workspace.dependencies]
 anyhow = "1.0"
 axum = { version = "0.8.4", default-features = false }
+bevy = "0.16"
 bevy_app = "0.16"
 bevy_derive = "0.16"
 bevy_diagnostic = "0.16"
@@ -42,6 +43,7 @@ bevy_time = "0.16"
 bevy_utils = "0.16"
 clap = { version = "4.5.23", features = ["derive"] }
 futures-concurrency = "7.7"
+glam = "0.29.3"
 mime_guess = "2.0.5"
 schemars = "1.2.0"
 serde = "1.0.219"
@@ -57,6 +59,7 @@ tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 prost-build = "0.14"
 prost-reflect = "0.16"
+rand = "0.9.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 futures = "0.3.31"
@@ -212,6 +215,8 @@ members = [
   "examples/diagram/calculator_ops_catalog",
   "examples/native",
   "examples/handbook_snippets",
+  "examples/diagram/traffic_app",
+  "examples/diagram/traffic_ops_catalog",
 ]
 
 [[bin]]

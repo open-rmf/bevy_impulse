@@ -1,0 +1,125 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "09fc9c55-e7fe-4faf-a995-fac4656c6024",
+  "ops": {
+    "09fc9c55-e7fe-4faf-a995-fac4656c6024": {
+      "type": "node",
+      "builder": "set_throttle",
+      "next": {
+        "builtin": "terminate"
+      }
+    }
+  },
+  "description": "Drive the vehicle forward at a fixed rate.",
+  "input_examples": [
+    {
+      "description": "Drive forward at 10 km/h",
+      "value": "10"
+    }
+  ],
+  "script_environments": {},
+  "extensions": {
+    "crossflow-diagram-editor-v1": {
+      "hash": "66308eaa89c6e48078f732140d4d098515b037f4",
+      "state": {
+        "nodes": [
+          {
+            "id": ":__builtin_start__",
+            "type": "start",
+            "position": {
+              "x": 100,
+              "y": 25
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            }
+          },
+          {
+            "id": ":__builtin_terminate__",
+            "type": "terminate",
+            "position": {
+              "x": 100,
+              "y": 225
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            }
+          },
+          {
+            "id": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "type": "node",
+            "position": {
+              "x": 100,
+              "y": 125
+            },
+            "data": {
+              "namespace": "",
+              "opId": "09fc9c55-e7fe-4faf-a995-fac4656c6024",
+              "op": {
+                "type": "node",
+                "builder": "set_throttle",
+                "next": {
+                  "builtin": "terminate"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "4753fbd1-74a4-4ab0-ae9e-768019e31b61",
+            "source": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "ecaf78ee-7cb2-4817-8452-6b09a0640deb",
+            "source": ":__builtin_start__",
+            "target": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

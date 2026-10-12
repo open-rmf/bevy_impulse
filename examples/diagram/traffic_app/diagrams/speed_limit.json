@@ -1,0 +1,772 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "53642a5a-568d-46af-b068-9b55290c9514",
+  "ops": {
+    "3c7d6bff-6aef-448b-b034-43a2de1540cf": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "execute",
+      "next": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+      "stream_out": {
+        "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+      }
+    },
+    "e99ffc89-4d3f-4d26-a5c3-819cf1209092": {
+      "type": "node",
+      "builder": "set_throttle",
+      "next": "cfd1dc8c-6949-4049-9b47-2811b05f730c"
+    },
+    "cfd1dc8c-6949-4049-9b47-2811b05f730c": {
+      "type": "fork_result",
+      "err": {
+        "builtin": "terminate"
+      },
+      "ok": {
+        "builtin": "dispose"
+      }
+    },
+    "1a223192-94d1-4bed-a972-79e71e28fd10": {
+      "type": "node",
+      "builder": "detect_speed_limit",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "speed_limit": "73ab1393-a4a8-490e-9518-ae02b2acf6cc"
+      }
+    },
+    "53642a5a-568d-46af-b068-9b55290c9514": {
+      "type": "fork_clone",
+      "next": [
+        "1799aad6-e0c0-4c8f-932e-add884124171",
+        "c3141404-9855-4e48-9384-e416cc7ed846",
+        "bd360973-86d0-4d71-b3bc-f96d87b3a42a"
+      ]
+    },
+    "73ab1393-a4a8-490e-9518-ae02b2acf6cc": {
+      "type": "buffer"
+    },
+    "1799aad6-e0c0-4c8f-932e-add884124171": {
+      "type": "buffer_access",
+      "buffers": {
+        "speed_limit": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+        "stop_request": "d67caa5d-7d3d-4a73-a997-5102714c3e41"
+      },
+      "next": "3c7d6bff-6aef-448b-b034-43a2de1540cf"
+    },
+    "f7f53702-2df4-48e2-91c4-f0859a0d27d4": {
+      "type": "script",
+      "environment": "scripts",
+      "run": "stop",
+      "next": {
+        "builtin": "terminate"
+      },
+      "display_text": "stop",
+      "stream_out": {
+        "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+      }
+    },
+    "c3141404-9855-4e48-9384-e416cc7ed846": {
+      "type": "transform",
+      "cel": "null",
+      "next": "1a223192-94d1-4bed-a972-79e71e28fd10"
+    },
+    "bd360973-86d0-4d71-b3bc-f96d87b3a42a": {
+      "type": "transform",
+      "cel": "null",
+      "next": "4c8421a6-f8ee-459a-881d-b480d7c962bc"
+    },
+    "4c8421a6-f8ee-459a-881d-b480d7c962bc": {
+      "type": "node",
+      "builder": "detect_stop_request",
+      "next": {
+        "builtin": "dispose"
+      },
+      "stream_out": {
+        "stop": "d67caa5d-7d3d-4a73-a997-5102714c3e41"
+      }
+    },
+    "d67caa5d-7d3d-4a73-a997-5102714c3e41": {
+      "type": "buffer"
+    }
+  },
+  "description": "Drive forward, following the speed limit posted by the road signs along the way. Runs for 10 seconds unless you input a different duration (in seconds). Press the simulator's Send stop request button to end the trip early.",
+  "input_examples": [
+    {
+      "description": "Run for 60 seconds.",
+      "value": "60"
+    }
+  ],
+  "script_environments": {
+    "scripts": {
+      "builder": "process-bound-python",
+      "config": {
+        "ownership": "shared",
+        "script": "import asyncio\nfrom crossflow import *\n\nasync def execute(input: Input):\n    speed_limit = input.accessors['speed_limit'].fetch_by_clone()\n    stop_request = input.accessors['stop_request'].fetch_by_clone()\n\n    duration = input.data\n    if duration is None:\n        duration = 10.0\n\n    dt = 0.1\n    t = 0.0\n    while t < duration:\n        t += dt\n\n        # End the trip early when the user sends a stop request\n        if await stop_request.try_fetch() is not None:\n            print('Stop requested by user, ending the trip early')\n            break\n\n        limit = await speed_limit.try_fetch()\n        if limit is None:\n            # No speed limit sign in sight yet; drive slowly\n            input.stream_out('speed', 20)\n        else:\n            input.stream_out('speed', limit)\n        await asyncio.sleep(dt)\n\ndef stop(input: Input):\n    input.stream_out('speed', 0)\n"
+      }
+    }
+  },
+  "extensions": {
+    "crossflow-diagram-editor-v1": {
+      "hash": "db606f4296db61f12d2a7c3b0205253fa367bfa7",
+      "state": {
+        "nodes": [
+          {
+            "id": ":__builtin_start__",
+            "type": "start",
+            "position": {
+              "x": 167.5,
+              "y": 25
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": ":__builtin_terminate__",
+            "type": "terminate",
+            "position": {
+              "x": 167.5,
+              "y": 1025
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "3737496e-d184-466f-b03d-8e019df39c33",
+            "type": "script",
+            "position": {
+              "x": 167.5,
+              "y": 625
+            },
+            "data": {
+              "namespace": "",
+              "opId": "3c7d6bff-6aef-448b-b034-43a2de1540cf",
+              "op": {
+                "type": "script",
+                "environment": "scripts",
+                "run": "execute",
+                "next": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+                "stream_out": {
+                  "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "type": "node",
+            "position": {
+              "x": 557.1857869269438,
+              "y": 785.2498055090134
+            },
+            "data": {
+              "namespace": "",
+              "opId": "e99ffc89-4d3f-4d26-a5c3-819cf1209092",
+              "op": {
+                "type": "node",
+                "builder": "set_throttle",
+                "next": "cfd1dc8c-6949-4049-9b47-2811b05f730c"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "type": "fork_result",
+            "position": {
+              "x": 557.1857869269436,
+              "y": 890.8287801744151
+            },
+            "data": {
+              "namespace": "",
+              "opId": "cfd1dc8c-6949-4049-9b47-2811b05f730c",
+              "op": {
+                "type": "fork_result",
+                "err": {
+                  "builtin": "terminate"
+                },
+                "ok": {
+                  "builtin": "dispose"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "type": "node",
+            "position": {
+              "x": 485.96094055377523,
+              "y": 320.0168837996778
+            },
+            "data": {
+              "namespace": "",
+              "opId": "1a223192-94d1-4bed-a972-79e71e28fd10",
+              "op": {
+                "type": "node",
+                "builder": "detect_speed_limit",
+                "next": {
+                  "builtin": "dispose"
+                },
+                "stream_out": {
+                  "speed_limit": "73ab1393-a4a8-490e-9518-ae02b2acf6cc"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "type": "fork_clone",
+            "position": {
+              "x": 167.5,
+              "y": 125
+            },
+            "data": {
+              "namespace": "",
+              "opId": "53642a5a-568d-46af-b068-9b55290c9514",
+              "op": {
+                "type": "fork_clone",
+                "next": [
+                  "1799aad6-e0c0-4c8f-932e-add884124171",
+                  "c3141404-9855-4e48-9384-e416cc7ed846",
+                  "bd360973-86d0-4d71-b3bc-f96d87b3a42a"
+                ]
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "type": "buffer",
+            "position": {
+              "x": 482.95234008178886,
+              "y": 415.50666415888065
+            },
+            "data": {
+              "namespace": "",
+              "opId": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "type": "buffer_access",
+            "position": {
+              "x": 167.5,
+              "y": 525
+            },
+            "data": {
+              "namespace": "",
+              "opId": "1799aad6-e0c0-4c8f-932e-add884124171",
+              "op": {
+                "type": "buffer_access",
+                "buffers": {
+                  "speed_limit": "73ab1393-a4a8-490e-9518-ae02b2acf6cc",
+                  "stop_request": "d67caa5d-7d3d-4a73-a997-5102714c3e41"
+                },
+                "next": "3c7d6bff-6aef-448b-b034-43a2de1540cf"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "type": "script",
+            "position": {
+              "x": 167.64506781799466,
+              "y": 734.7632056644528
+            },
+            "data": {
+              "namespace": "",
+              "opId": "f7f53702-2df4-48e2-91c4-f0859a0d27d4",
+              "op": {
+                "type": "script",
+                "environment": "scripts",
+                "run": "stop",
+                "next": {
+                  "builtin": "terminate"
+                },
+                "display_text": "stop",
+                "stream_out": {
+                  "speed": "e99ffc89-4d3f-4d26-a5c3-819cf1209092"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "0c5ccd1a-4b77-4caa-a303-90890b54d910",
+            "type": "transform",
+            "position": {
+              "x": 485.96094055377534,
+              "y": 227.36198532285906
+            },
+            "data": {
+              "namespace": "",
+              "opId": "c3141404-9855-4e48-9384-e416cc7ed846",
+              "op": {
+                "type": "transform",
+                "cel": "null",
+                "next": "1a223192-94d1-4bed-a972-79e71e28fd10"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "444b034f-aada-40ef-a8cf-9c5cb449ab9f",
+            "type": "transform",
+            "position": {
+              "x": 800,
+              "y": 225
+            },
+            "data": {
+              "namespace": "",
+              "opId": "bd360973-86d0-4d71-b3bc-f96d87b3a42a",
+              "op": {
+                "type": "transform",
+                "cel": "null",
+                "next": "4c8421a6-f8ee-459a-881d-b480d7c962bc"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "83fe1812-2ccf-492a-9a81-502f7e2a41c6",
+            "type": "node",
+            "position": {
+              "x": 800,
+              "y": 320
+            },
+            "data": {
+              "namespace": "",
+              "opId": "4c8421a6-f8ee-459a-881d-b480d7c962bc",
+              "op": {
+                "type": "node",
+                "builder": "detect_stop_request",
+                "next": {
+                  "builtin": "dispose"
+                },
+                "stream_out": {
+                  "stop": "d67caa5d-7d3d-4a73-a997-5102714c3e41"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "79b7c035-79b0-416c-a579-9e54abe6627c",
+            "type": "buffer",
+            "position": {
+              "x": 800,
+              "y": 420
+            },
+            "data": {
+              "namespace": "",
+              "opId": "d67caa5d-7d3d-4a73-a997-5102714c3e41",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "145f9968-5329-4234-a1f4-d6f8814deb1d",
+            "source": "3737496e-d184-466f-b03d-8e019df39c33",
+            "sourceHandle": "dataStream",
+            "target": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "speed"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "76b5267d-93d0-416c-9fc2-e7356ba9a2ea",
+            "source": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "target": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "020da698-b9e7-441a-ac0f-d56c1cbf6b7f",
+            "source": "e528f557-94da-47d7-974f-7706fca18bd3",
+            "sourceHandle": "forkResultErr",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "forkResultErr",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "75db870c-9a4d-46d4-bde2-6a1d8e84280e",
+            "source": ":__builtin_start__",
+            "target": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "67b1a28c-1a18-46cc-b730-2fd511e17b4b",
+            "source": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "sourceHandle": "dataStream",
+            "target": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "speed_limit"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "42a4cdb2-ac5c-4842-82a1-ae9d481cc9ea",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "3f252318-95a9-42e1-89f4-e574de848401",
+            "source": "69088c99-a5d6-4a05-b61c-d85ad7a04a56",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferKey",
+                "key": "speed_limit"
+              }
+            },
+            "style": {},
+            "selected": false
+          },
+          {
+            "id": "9c8447ba-2b1e-4eb3-836b-193767475d7f",
+            "source": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "target": "3737496e-d184-466f-b03d-8e019df39c33",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "6260a708-c936-4384-b8ba-d0212ff6964a",
+            "source": "3737496e-d184-466f-b03d-8e019df39c33",
+            "target": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "9e7036bd-12a5-4777-b660-4c458cfebbdf",
+            "source": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "7c4e07b4-55d0-470e-8e2e-5bc6a173009e",
+            "source": "d02ae3e2-caea-4bdc-a6f5-84edd0d421f9",
+            "sourceHandle": "dataStream",
+            "target": "9eccd69d-a7b7-4cb9-ab93-156b8afbafb8",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "speed"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "572199e4-9fc2-4258-aded-4e4db828c225",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "0c5ccd1a-4b77-4caa-a303-90890b54d910",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "af2d0f7e-31a7-49c7-9e24-b8dc29ebc4dd",
+            "source": "0c5ccd1a-4b77-4caa-a303-90890b54d910",
+            "target": "ea7548cb-16bd-4f14-bed5-4f96e9c6c8e5",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "de26c1e6-393d-4c6c-bcba-781aa2bbfaa1",
+            "source": "27980010-ff2d-44f2-9dfc-1fe25cdf11f3",
+            "target": "444b034f-aada-40ef-a8cf-9c5cb449ab9f",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "f76b7719-0533-4051-8923-9de47450e569",
+            "source": "444b034f-aada-40ef-a8cf-9c5cb449ab9f",
+            "target": "83fe1812-2ccf-492a-9a81-502f7e2a41c6",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "cc042fce-60e1-457c-998b-3defb7fdc4b8",
+            "source": "83fe1812-2ccf-492a-9a81-502f7e2a41c6",
+            "target": "79b7c035-79b0-416c-a579-9e54abe6627c",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "streamOut",
+            "data": {
+              "output": {
+                "streamId": "stop"
+              },
+              "input": {
+                "type": "default"
+              }
+            }
+          },
+          {
+            "id": "3a3158af-a0a3-4054-bd2d-273d11978154",
+            "source": "79b7c035-79b0-416c-a579-9e54abe6627c",
+            "target": "66b6b822-73ea-471d-85b3-76fb876e0984",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferKey",
+                "key": "stop_request"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

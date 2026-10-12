@@ -1,0 +1,391 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/crossflow/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "6f3196e4-51d1-46a5-a8d1-f42f9d85bb4c",
+  "ops": {
+    "09fc9c55-e7fe-4faf-a995-fac4656c6024": {
+      "type": "node",
+      "builder": "set_throttle",
+      "next": "81accdc8-0351-4e3f-b537-3694448c00e8"
+    },
+    "a0ccb769-297d-48a0-ad64-3922d6a437ea": {
+      "type": "node",
+      "builder": "steer",
+      "next": "14ffd4ea-27fc-465a-be10-33a08d49bcc8",
+      "display_text": "Steer"
+    },
+    "6f3196e4-51d1-46a5-a8d1-f42f9d85bb4c": {
+      "type": "split",
+      "keyed": {
+        "throttle": "09fc9c55-e7fe-4faf-a995-fac4656c6024",
+        "steer": "a0ccb769-297d-48a0-ad64-3922d6a437ea"
+      }
+    },
+    "d71dfd17-a80c-4315-84ae-09a787d3bfd9": {
+      "type": "join",
+      "buffers": [
+        "81accdc8-0351-4e3f-b537-3694448c00e8",
+        "14ffd4ea-27fc-465a-be10-33a08d49bcc8"
+      ],
+      "next": {
+        "builtin": "terminate"
+      }
+    },
+    "81accdc8-0351-4e3f-b537-3694448c00e8": {
+      "type": "buffer"
+    },
+    "14ffd4ea-27fc-465a-be10-33a08d49bcc8": {
+      "type": "buffer"
+    }
+  },
+  "description": "Set the throttle and steering to fixed values, which will cause the vehicle to spin in donuts.",
+  "input_examples": [
+    {
+      "description": "Spin in circles",
+      "value": "{\n  \"throttle\": 20,\n  \"steer\": -45\n}"
+    }
+  ],
+  "script_environments": {},
+  "extensions": {
+    "crossflow-diagram-editor-v1": {
+      "hash": "ebedf288b024f55f57a97425a6e9c10c33605489",
+      "state": {
+        "nodes": [
+          {
+            "id": ":__builtin_start__",
+            "type": "start",
+            "position": {
+              "x": 225,
+              "y": 25
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": ":__builtin_terminate__",
+            "type": "terminate",
+            "position": {
+              "x": 225,
+              "y": 525
+            },
+            "selectable": false,
+            "data": {
+              "namespace": ""
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "type": "node",
+            "position": {
+              "x": 100,
+              "y": 225
+            },
+            "data": {
+              "namespace": "",
+              "opId": "09fc9c55-e7fe-4faf-a995-fac4656c6024",
+              "op": {
+                "type": "node",
+                "builder": "set_throttle",
+                "next": "81accdc8-0351-4e3f-b537-3694448c00e8"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "54788cb6-1a01-4053-922a-5dedd3fe164d",
+            "type": "node",
+            "position": {
+              "x": 350,
+              "y": 225
+            },
+            "data": {
+              "namespace": "",
+              "opId": "a0ccb769-297d-48a0-ad64-3922d6a437ea",
+              "op": {
+                "type": "node",
+                "builder": "steer",
+                "next": "14ffd4ea-27fc-465a-be10-33a08d49bcc8",
+                "display_text": "Steer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "c70cab9b-7e74-484c-8bbd-8dd3907b032c",
+            "type": "split",
+            "position": {
+              "x": 225,
+              "y": 125
+            },
+            "data": {
+              "namespace": "",
+              "opId": "6f3196e4-51d1-46a5-a8d1-f42f9d85bb4c",
+              "op": {
+                "type": "split",
+                "keyed": {
+                  "throttle": "09fc9c55-e7fe-4faf-a995-fac4656c6024",
+                  "steer": "a0ccb769-297d-48a0-ad64-3922d6a437ea"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "a0e9791e-4759-4f12-a6af-9004c9fbd9b1",
+            "type": "join",
+            "position": {
+              "x": 225,
+              "y": 425
+            },
+            "data": {
+              "namespace": "",
+              "opId": "d71dfd17-a80c-4315-84ae-09a787d3bfd9",
+              "op": {
+                "type": "join",
+                "buffers": [
+                  "81accdc8-0351-4e3f-b537-3694448c00e8",
+                  "14ffd4ea-27fc-465a-be10-33a08d49bcc8"
+                ],
+                "next": {
+                  "builtin": "terminate"
+                }
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "cd5e2dd0-f985-44a2-a49d-1db6b8c033ab",
+            "type": "buffer",
+            "position": {
+              "x": 100,
+              "y": 325
+            },
+            "data": {
+              "namespace": "",
+              "opId": "81accdc8-0351-4e3f-b537-3694448c00e8",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          },
+          {
+            "id": "cdcf3c3d-2416-478a-9aee-f4dd73e610f8",
+            "type": "buffer",
+            "position": {
+              "x": 350,
+              "y": 325
+            },
+            "data": {
+              "namespace": "",
+              "opId": "14ffd4ea-27fc-465a-be10-33a08d49bcc8",
+              "op": {
+                "type": "buffer"
+              }
+            },
+            "measured": {
+              "width": 200,
+              "height": 50
+            },
+            "selected": false,
+            "dragging": false
+          }
+        ],
+        "edges": [
+          {
+            "id": "8ead19d8-a169-4c6e-be14-ccfbb7d539c5",
+            "source": ":__builtin_start__",
+            "target": "c70cab9b-7e74-484c-8bbd-8dd3907b032c",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "c4c2abe2-607f-482a-9bfa-2cf793d6b27d",
+            "source": "c70cab9b-7e74-484c-8bbd-8dd3907b032c",
+            "target": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "splitKey",
+            "data": {
+              "output": {
+                "key": "throttle"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "9545508a-0ed4-4e77-ba22-7d463c8a80a5",
+            "source": "c70cab9b-7e74-484c-8bbd-8dd3907b032c",
+            "target": "54788cb6-1a01-4053-922a-5dedd3fe164d",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "splitKey",
+            "data": {
+              "output": {
+                "key": "steer"
+              },
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "d223c9f0-61fb-44f0-a03f-0d7fe3c31111",
+            "source": "2183ff24-5ab9-4377-9f24-789e4517b810",
+            "target": "cd5e2dd0-f985-44a2-a49d-1db6b8c033ab",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "1c9448a7-ff1b-4a52-8c2f-17f9dbc2eafd",
+            "source": "54788cb6-1a01-4053-922a-5dedd3fe164d",
+            "target": "cdcf3c3d-2416-478a-9aee-f4dd73e610f8",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          },
+          {
+            "id": "b40520df-988c-4f52-b74e-040cfeb4ea43",
+            "source": "cd5e2dd0-f985-44a2-a49d-1db6b8c033ab",
+            "target": "a0e9791e-4759-4f12-a6af-9004c9fbd9b1",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferSeq",
+                "seq": 0
+              }
+            },
+            "style": {},
+            "selected": false
+          },
+          {
+            "id": "383f5b0a-e793-4c48-bf74-5508fddf85f1",
+            "source": "cdcf3c3d-2416-478a-9aee-f4dd73e610f8",
+            "target": "a0e9791e-4759-4f12-a6af-9004c9fbd9b1",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "buffer",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "bufferSeq",
+                "seq": 1
+              }
+            },
+            "style": {},
+            "selected": false
+          },
+          {
+            "id": "1ba1c5ac-2994-41ba-81ea-cbe6d6bc8e02",
+            "source": "a0e9791e-4759-4f12-a6af-9004c9fbd9b1",
+            "target": ":__builtin_terminate__",
+            "markerEnd": {
+              "type": "arrowclosed",
+              "width": 20,
+              "height": 20
+            },
+            "type": "default",
+            "data": {
+              "output": {},
+              "input": {
+                "type": "default"
+              }
+            },
+            "selected": false
+          }
+        ]
+      }
+    }
+  }
+}

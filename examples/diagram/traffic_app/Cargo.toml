@@ -1,0 +1,23 @@
+[package]
+name = "traffic_app"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "traffic_app"
+
+[[bin]]
+path = "src/main.rs"
+name = "traffic_app"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_ecs = { workspace = true }
+crossflow = { version = "0.0.7", path = "../../..", features = ["diagram", "python"] }
+crossflow_diagram_editor = { path = "../../../diagram-editor", features = ["basic_executor"] }
+rand = { workspace = true }
+traffic_ops_catalog = { path = "../traffic_ops_catalog" }
+
+[build-dependencies]
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

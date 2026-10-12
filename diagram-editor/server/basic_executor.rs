@@ -19,7 +19,8 @@ use crate::{ServerOptions, new_router};
 use bevy_app::App;
 use clap::Parser;
 use crossflow::{
-    CrossflowExecutorApp, Diagram, DiagramError, Outcome, RequestExt, RunCommandsOnWorldExt,
+    CrossflowExecutorApp, CrossflowPlugin, Diagram, DiagramError, Outcome, RequestExt,
+    RunCommandsOnWorldExt,
 };
 use std::thread;
 use std::{fs::File, str::FromStr};
@@ -60,10 +61,57 @@ pub struct RunArgs {
     request: String,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Copy)]
 pub struct ServeArgs {
     #[arg(short, long, default_value_t = 3000)]
     port: u16,
+}
+
+impl Default for ServeArgs {
+    fn default() -> Self {
+        Self { port: 3000 }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub enum PluginSelection {
+    /// Include the [`CrossflowExecutorApp`] plugins. Use this if you will not
+    /// be adding any Bevy plugins yourself.
+    #[default]
+    App,
+    /// Only include the basic [`CrossflowPlugin`]. Use this if you will be
+    /// adding the standard Bevy plugins yourself.
+    Minimal,
+}
+
+#[derive(Default)]
+pub struct CustomRun {
+    pub plugins: PluginSelection,
+    pub args: Option<Args>,
+}
+
+impl From<()> for CustomRun {
+    fn from(_: ()) -> Self {
+        Default::default()
+    }
+}
+
+impl From<Args> for CustomRun {
+    fn from(args: Args) -> Self {
+        CustomRun {
+            plugins: Default::default(),
+            args: Some(args),
+        }
+    }
+}
+
+impl From<PluginSelection> for CustomRun {
+    fn from(plugins: PluginSelection) -> Self {
+        CustomRun {
+            plugins,
+            args: Default::default(),
+        }
+    }
 }
 
 pub fn headless(
@@ -111,6 +159,43 @@ pub async fn serve(
         app.run()
     });
 
+    axum_serve(router_receiver, args).await
+}
+
+pub fn custom_serve(
+    plugins: PluginSelection,
+    args: ServeArgs,
+    setup: impl FnOnce() -> BasicExecutorSetup + 'static,
+) -> Result<(), Box<dyn Error>> {
+    println!("Serving diagram editor at http://localhost:{}", args.port);
+
+    let BasicExecutorSetup { mut app, registry } = setup();
+    // If WinitPlugin is added, add CrossflowPlugin instead of
+    // CrossflowExecutorApp to prevent overlapping plugins
+    match plugins {
+        PluginSelection::App => {
+            app.add_plugins(CrossflowExecutorApp::default());
+        }
+        PluginSelection::Minimal => {
+            app.add_plugins(CrossflowPlugin::default());
+        }
+    }
+
+    let (router_sender, router_receiver) = tokio::sync::oneshot::channel();
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = rt.block_on(axum_serve(router_receiver, args));
+    });
+    let router = new_router(&mut app, registry, ServerOptions::default());
+    let _ = router_sender.send(router);
+    app.run();
+    Ok(())
+}
+
+pub async fn axum_serve(
+    router_receiver: tokio::sync::oneshot::Receiver<axum::routing::Router>,
+    args: ServeArgs,
+) -> Result<(), Box<dyn Error>> {
     let router = router_receiver.await?;
 
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
@@ -186,22 +271,23 @@ impl BasicExecutorSetup {
 ///   structure cannot be moved between threads. This closure will be moved between
 ///   threads so it must have the Send trait.
 pub fn run_custom_setup(
-    args: Option<Args>,
+    settings: impl Into<CustomRun>,
     setup: impl FnOnce() -> BasicExecutorSetup + Send + 'static,
 ) -> Result<(), Box<dyn Error>> {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(run_custom_setup_async(args, setup))
-}
-
-/// Run a custom setup of a basic executor asynchronously. For more information,
-/// see [`run_custom_setup`].
-pub async fn run_custom_setup_async(
-    args: Option<Args>,
-    setup: impl FnOnce() -> BasicExecutorSetup + Send + 'static,
-) -> Result<(), Box<dyn Error>> {
+    let CustomRun { args, plugins } = settings.into();
     let args = args.unwrap_or_else(|| Args::parse());
     match args.command {
-        Commands::Run(args) => headless(args, setup),
-        Commands::Serve(args) => serve(args, setup).await,
+        Commands::Run(args) => {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async_headless(args, setup))
+        }
+        Commands::Serve(args) => custom_serve(plugins, args, setup),
     }
+}
+
+pub async fn async_headless(
+    args: RunArgs,
+    setup: impl FnOnce() -> BasicExecutorSetup + Send + 'static,
+) -> Result<(), Box<dyn Error>> {
+    headless(args, setup)
 }

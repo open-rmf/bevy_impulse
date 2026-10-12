@@ -26,6 +26,6 @@ anyhow = { workspace = true }
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 async-std = "1.12"
 clap = { workspace = true }
-glam = "*"
+glam = { workspace = true }
 trpl = "0.3"
 rand = "0.9"
