@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { type ReactNode, useEffect } from 'react';
 import { of } from 'rxjs';
 import { ApiClient } from '../api-client';
@@ -14,6 +21,10 @@ import {
 import { NodeManager, NodeManagerProvider } from '../node-manager';
 import { NotificationProvider } from '../notification-provider';
 import { RegistryProvider } from '../registry-provider';
+import {
+  TransientEditorDraftProvider,
+  useTransientEditorDrafts,
+} from '../transient-editor-drafts';
 import type { DiagramElementMetadata } from '../types/api';
 import {
   ScriptEnvironmentWorkspace,
@@ -173,9 +184,11 @@ function renderWorkspace(
       <RegistryProvider>
         <NodeManagerProvider value={new NodeManager([])}>
           <DiagramPropertiesProvider>
-            <DiagramSidePanelProvider>
-              <NotificationProvider>{ui}</NotificationProvider>
-            </DiagramSidePanelProvider>
+            <TransientEditorDraftProvider>
+              <DiagramSidePanelProvider>
+                <NotificationProvider>{ui}</NotificationProvider>
+              </DiagramSidePanelProvider>
+            </TransientEditorDraftProvider>
           </DiagramPropertiesProvider>
         </NodeManagerProvider>
       </RegistryProvider>
@@ -215,6 +228,17 @@ describe('ScriptEnvironmentWorkspace', () => {
       expect(
         screen.getByLabelText('Builder Config (JSON)'),
       ).toBeInTheDocument();
+    });
+    const config = screen.getByLabelText('Builder Config (JSON)');
+    fireEvent.change(config, {
+      target: { value: '{"script_content":"first"}' },
+    });
+    fireEvent.mouseDown(screen.getByLabelText('Code Field'));
+    fireEvent.click(screen.getByRole('option', { name: 'script_content' }));
+    expect(scriptEditor()).toHaveValue('first');
+    changeScript('second');
+    expect(JSON.parse((config as HTMLTextAreaElement).value)).toEqual({
+      script_content: 'second',
     });
   });
 
@@ -433,6 +457,11 @@ describe('ScriptEnvironmentWorkspace', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /New environment/ }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Discard',
+      }),
+    );
 
     await waitFor(() => {
       expect(environmentName).toHaveValue('');
@@ -449,4 +478,145 @@ describe('ScriptEnvironmentWorkspace', () => {
       await screen.findByText('No script environment builders are available.'),
     ).toBeInTheDocument();
   });
+});
+
+let panel: ReturnType<typeof useDiagramSidePanel>;
+let drafts: ReturnType<typeof useTransientEditorDrafts>;
+let properties: ReturnType<typeof useDiagramProperties>[0];
+function SessionProbe() {
+  panel = useDiagramSidePanel();
+  drafts = useTransientEditorDrafts();
+  [properties] = useDiagramProperties();
+  return null;
+}
+
+function click(name: string, root: HTMLElement = document.body) {
+  fireEvent.click(within(root).getByRole('button', { name }));
+}
+const scriptEditor = () =>
+  screen.getByRole('textbox', { name: 'Script editor' });
+const changeScript = (value: string) =>
+  fireEvent.change(scriptEditor(), { target: { value } });
+async function editEnvironment() {
+  renderWorkspace(
+    <>
+      <SeededWorkspace />
+      <SessionProbe />
+    </>,
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Edit environment' }),
+  );
+}
+
+test('only actual changes block export; reverting or saving clears the draft', async () => {
+  await editEnvironment();
+  expect(drafts.hasUncommittedBuffers).toBe(false);
+  changeScript('changed code');
+  expect(drafts.hasUncommittedBuffers).toBe(true);
+  expect(properties.script_environments?.analysis.config).toMatchObject({
+    script: 'def run(): pass',
+  });
+  changeScript('def run(): pass');
+  expect(drafts.hasUncommittedBuffers).toBe(false);
+  changeScript('saved code');
+  click('Save');
+  expect(drafts.drafts.scriptEnvironment).toBeUndefined();
+  expect(properties.script_environments?.analysis.config).toMatchObject({
+    script: 'saved code',
+  });
+  await startEnvironmentCreationFromSelector();
+  expect(drafts.hasUncommittedBuffers).toBe(false);
+});
+
+test('Cancel asks before discarding; cancelling or Escape preserves the changes', async () => {
+  await editEnvironment();
+  changeScript('unsaved');
+  click('Cancel');
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('Discard environment changes?');
+  click('Cancel', dialog);
+  expect(
+    await screen.findByRole('textbox', { name: 'Script editor' }),
+  ).toHaveValue('unsaved');
+  click('Cancel');
+  fireEvent.keyDown(screen.getByRole('dialog'), {
+    key: 'Escape',
+    code: 'Escape',
+  });
+  expect(
+    await screen.findByRole('textbox', { name: 'Script editor' }),
+  ).toHaveValue('unsaved');
+  click('Cancel');
+  click('Discard', screen.getByRole('dialog'));
+  expect(drafts.drafts.scriptEnvironment).toBeUndefined();
+  expect(properties.script_environments?.analysis.config).toMatchObject({
+    script: 'def run(): pass',
+  });
+});
+
+test('navigation can be cancelled, saved, or discarded without bypassing validation', async () => {
+  await editEnvironment();
+  changeScript('updated');
+  for (const navigate of [
+    panel.close,
+    () => panel.showTab('run'),
+    () => panel.toggleTab('environments'),
+    () => panel.openEnvironments({ create: true }),
+  ]) {
+    act(navigate);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Save environment changes?');
+    click('Cancel', dialog);
+    expect(panel.state).toMatchObject({ open: true, tab: 'environments' });
+    expect(
+      await screen.findByRole('textbox', { name: 'Script editor' }),
+    ).toHaveValue('updated');
+  }
+  act(panel.close);
+  click('Save & Continue', screen.getByRole('dialog'));
+  expect(panel.state.open).toBe(false);
+  expect(properties.script_environments?.analysis.config).toMatchObject({
+    script: 'updated',
+  });
+  act(() => panel.openEnvironments({ create: true }));
+  fireEvent.change(screen.getByLabelText('Environment Name'), {
+    target: { value: 'analysis' },
+  });
+  act(() => panel.showTab('run'));
+  expect(
+    within(screen.getByRole('dialog')).getByRole('button', {
+      name: 'Save & Continue',
+    }),
+  ).toBeDisabled();
+  click('Discard', screen.getByRole('dialog'));
+  expect(panel.state.tab).toBe('run');
+  expect(drafts.drafts.scriptEnvironment).toBeUndefined();
+});
+
+test('popup edits stay unapplied and closing it returns the same editor to the panel', async () => {
+  await editEnvironment();
+  const editor = scriptEditor();
+  const frame = document.createElement('iframe');
+  document.body.appendChild(frame);
+  const popup = frame.contentWindow!;
+  const open = jest.spyOn(window, 'open').mockReturnValue(popup);
+  const close = jest.spyOn(popup, 'close').mockImplementation(() => {});
+  click('Open environment in separate window');
+  expect(
+    within(popup.document.body).getByRole('textbox', { name: 'Script editor' }),
+  ).toBe(editor);
+  fireEvent.change(editor, { target: { value: 'edited in window' } });
+  act(panel.close);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  act(() => popup.dispatchEvent(new Event('pagehide')));
+  await waitFor(() => expect(scriptEditor()).toBe(editor));
+  expect(editor).toHaveValue('edited in window');
+  expect(panel.state).toMatchObject({ open: true, tab: 'environments' });
+  expect(properties.script_environments?.analysis.config).toMatchObject({
+    script: 'def run(): pass',
+  });
+  open.mockRestore();
+  close.mockRestore();
+  frame.remove();
 });

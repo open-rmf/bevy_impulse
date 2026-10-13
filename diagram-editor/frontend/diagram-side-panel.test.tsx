@@ -89,8 +89,8 @@ describe('DiagramSidePanel', () => {
       '.MuiDrawer-paper',
     ) as HTMLElement;
 
-    expect(drawer.style.width).toBe('420px');
-    expect(drawerPaper.style.width).toBe('420px');
+    expect(drawer.style.width).toBe('480px');
+    expect(drawerPaper.style.width).toBe('480px');
     expect(drawerPaper.style.transition).toContain('width');
 
     const edge = drawerPaper.firstElementChild as HTMLElement;

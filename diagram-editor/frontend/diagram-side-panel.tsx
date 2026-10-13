@@ -145,6 +145,8 @@ function DiagramSidePanel({
           onPointerMove={(event) => {
             if (resizing) setWidth(window.innerWidth - event.clientX);
           }}
+          onPointerUp={() => setResizing(false)}
+          onPointerCancel={() => setResizing(false)}
           onLostPointerCapture={() => setResizing(false)}
           sx={{
             position: 'absolute',

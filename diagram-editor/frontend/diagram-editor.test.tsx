@@ -1,8 +1,15 @@
-import { Snackbar } from '@mui/material';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { Dialog, Snackbar } from '@mui/material';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import type { Connection, ReactFlowProps } from '@xyflow/react';
 import React from 'react';
 import { of } from 'rxjs';
+import CommandPanel, { type CommandPanelProps } from './command-panel';
 import type { CompatibleAddOperationProps } from './compatible-add-operation';
 import {
   ConnectionHintPanel,
@@ -11,6 +18,7 @@ import {
 import DiagramEditor from './diagram-editor';
 import { DiagramPropertiesProvider } from './diagram-properties-provider';
 import { DiagramSidePanelProvider } from './diagram-side-panel-controller';
+import { writeDraftWorkspace } from './draft-workspace';
 import type { DiagramEditorEdge } from './edges';
 import { createOperationNode, type DiagramEditorNode } from './nodes';
 import { TemplatesProvider } from './templates-provider';
@@ -65,7 +73,12 @@ jest.mock('@xyflow/react', () => {
         .requireActual('./interaction-visualization-provider')
         .useInteractionVisualization().setWorkflowRunning;
       return (
-        <output data-testid="compatibility-preview">{result?.status}</output>
+        <>
+          <output data-testid="compatibility-preview">{result?.status}</output>
+          {React.Children.toArray(props.children).filter(
+            (child) => React.isValidElement(child) && child.type === Dialog,
+          )}
+        </>
       );
     },
   };
@@ -390,4 +403,58 @@ test('type errors allow connect, reconnect, and add-and-connect', async () => {
     mockReactFlowProps.onConnect?.(startToTerminate);
   });
   expect(mockReactFlowProps.edges).toHaveLength(edgeCount);
+});
+
+test('restored environment creation keeps its node assignment after clearing the node selection', async () => {
+  const node = createOperationNode(
+    ROOT_NAMESPACE,
+    undefined,
+    { x: 200, y: 200 },
+    {
+      type: 'script',
+      environment: '',
+      run: 'execute',
+      next: { builtin: 'dispose' },
+    },
+    'script',
+  );
+  writeDraftWorkspace({
+    mainGraph: { nodes: [node], edges: [] },
+    templates: {},
+    diagramProperties: {},
+    filename: null,
+    transientEditors: {
+      operationConfigs: {},
+      scriptEnvironment: {
+        selectedEnvName: '',
+        mode: 'create',
+        envName: 'analysis',
+        builder: 'process-bound-python',
+        config: '{"script":"print(1)"}',
+        selectedCodeField: 'script',
+        isExpanded: false,
+        nodeId: node.id,
+      },
+    },
+  });
+  renderEditor();
+  await act(async () =>
+    mockReactFlowProps.onInit?.({
+      fitView: jest.fn(),
+      screenToFlowPosition: jest.fn(() => ({ x: 0, y: 0 })),
+    } as never),
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Restore' }));
+  act(() => mockReactFlowProps.onNodesDelete?.([]));
+  const commandPanel = React.Children.toArray(mockReactFlowProps.children).find(
+    (child) => React.isValidElement(child) && child.type === CommandPanel,
+  ) as React.ReactElement<CommandPanelProps>;
+  expect(commandPanel.props.scriptNodeBinding).toBeDefined();
+  act(() =>
+    commandPanel.props.scriptNodeBinding?.assignEnvironment('analysis'),
+  );
+  expect(
+    mockReactFlowProps.nodes.find(({ id }) => id === node.id)?.data.op,
+  ).toMatchObject({ environment: 'analysis' });
+  sessionStorage.clear();
 });

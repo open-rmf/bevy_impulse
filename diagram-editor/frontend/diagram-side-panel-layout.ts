@@ -6,7 +6,7 @@ export interface SidePanelLayoutState {
   width?: number;
 }
 
-export const NormalSidePanelWidth = 420;
+export const NormalSidePanelWidth = 480;
 export const ExpandedSidePanelWidth = 900;
 export const MinimumVisibleCanvasWidth = 56;
 export const EditPopoverWidth = 420;

@@ -20,9 +20,7 @@ const content: DraftWorkspaceContent = {
       envName: 'python',
       builder: 'process-bound-python',
       config: '{"script":"print(1)"}',
-      scriptText: 'print(1)',
       selectedCodeField: 'script',
-      language: 'python',
       isExpanded: false,
     },
   },
@@ -73,7 +71,7 @@ test.each([
       (
         (draft.transientEditors as Record<string, unknown>)
           .scriptEnvironment as Record<string, unknown>
-      ).scriptText = 1;
+      ).envName = 1;
     },
   ],
   [
@@ -126,4 +124,40 @@ test('surfaces storage write failures', () => {
     'quota exceeded',
   );
   setItem.mockRestore();
+});
+
+test('presentation and untouched environment forms do not dirty the workflow', () => {
+  const clean = { ...content, transientEditors: { operationConfigs: {} } };
+  const draft = content.transientEditors.scriptEnvironment!;
+  const opened = {
+    ...clean,
+    transientEditors: {
+      ...clean.transientEditors,
+      scriptEnvironment: {
+        ...draft,
+        initial: {
+          envName: draft.envName,
+          builder: draft.builder,
+          config: draft.config,
+        },
+      },
+    },
+    presentation: {
+      sidePanel: {
+        open: true,
+        tab: 'environments',
+        mode: 'create',
+        expanded: false,
+        width: 610,
+      },
+      viewport: { x: 12, y: 34, zoom: 1.5 },
+    },
+  };
+  expect(draftWorkspaceFingerprint(opened as DraftWorkspaceContent)).toBe(
+    draftWorkspaceFingerprint(clean),
+  );
+  opened.transientEditors.scriptEnvironment.config = '{"script":"changed"}';
+  expect(draftWorkspaceFingerprint(opened as DraftWorkspaceContent)).not.toBe(
+    draftWorkspaceFingerprint(clean),
+  );
 });

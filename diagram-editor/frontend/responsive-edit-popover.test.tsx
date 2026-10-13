@@ -50,7 +50,7 @@ describe('ResponsiveEditPopover', () => {
     const paper = document.querySelector('.MuiPopover-paper') as HTMLElement;
 
     await waitFor(() => {
-      expect(paper.style.left).toBe('584px');
+      expect(paper.style.left).toBe('524px');
       expect(getComputedStyle(paper).transition).toContain('left');
     });
 
@@ -85,7 +85,7 @@ describe('ResponsiveEditPopover', () => {
     fireEvent(window, new Event('resize'));
 
     await waitFor(() => {
-      expect(paper.style.left).toBe('344px');
+      expect(paper.style.left).toBe('284px');
     });
   });
 

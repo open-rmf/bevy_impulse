@@ -61,22 +61,7 @@ test('generated IDs avoid existing names, including other additions in the same 
   expect(added[0].data.opId).not.toBe(added[1].data.opId);
 });
 
-test('legacy IDs and manual IDs that look generated remain unchanged', () => {
-  const node = createOperationNode(
-    '',
-    undefined,
-    { x: 0, y: 0 },
-    op,
-    'node_add_ABC123',
-  );
-  const changed = {
-    ...node,
-    data: { ...node.data, op: { ...node.data.op, builder: 'subtract' } },
-  };
-  expect(replace(changed, [node])[0].data.opId).toBe('node_add_ABC123');
-});
-
-test.each([true, false])(
+test.each([true, false, undefined])(
   'save/reload preserves automatic mode (%s) and renamed connections',
   async (automatic) => {
     const source = createOperationNode('', undefined, { x: 0, y: 0 }, op);
@@ -105,7 +90,7 @@ test.each([true, false])(
       builder: 'subtract',
       next: target.data.opId,
     });
-    expect(id.startsWith('node_subtract_')).toBe(automatic);
+    expect(id.startsWith('node_subtract_')).toBe(automatic === true);
     await saveState(diagram, { nodes, edges });
     const loaded = await loadDiagram(JSON.parse(JSON.stringify(diagram)));
     const restored = loaded.graph.nodes.find((node) => node.id === source.id)!;

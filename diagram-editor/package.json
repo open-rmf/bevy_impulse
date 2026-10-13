@@ -27,6 +27,7 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/view": "^6.41.1",
     "@dagrejs/dagre": "^1.1.5",
+    "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@fontsource/roboto": "^5.2.5",
