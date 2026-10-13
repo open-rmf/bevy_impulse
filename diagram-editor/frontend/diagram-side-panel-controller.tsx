@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -16,6 +17,7 @@ export interface DiagramSidePanelState {
   selectedEnvironmentName?: string;
   mode: EnvironmentPanelMode;
   expanded: boolean;
+  width?: number;
 }
 
 export interface OpenEnvironmentsOptions {
@@ -23,9 +25,14 @@ export interface OpenEnvironmentsOptions {
   create?: boolean;
 }
 
+type EnvironmentLeaveGuard = (proceed: () => void, hidingOnly: boolean) => void;
+
 export interface DiagramSidePanelController {
   state: DiagramSidePanelState;
+  restoreState: (state: DiagramSidePanelState) => void;
   close: () => void;
+  setEnvironmentLeaveGuard: (guard: EnvironmentLeaveGuard | null) => void;
+  requestEnvironmentLeave: (proceed: () => void, hidingOnly?: boolean) => void;
   showTab: (tab: DiagramSidePanelTab) => void;
   toggleTab: (tab: DiagramSidePanelTab) => void;
   openEnvironments: (options?: OpenEnvironmentsOptions) => void;
@@ -34,6 +41,7 @@ export interface DiagramSidePanelController {
   startEnvironmentEdit: () => void;
   finishEnvironmentEdit: () => void;
   setExpanded: (expanded: boolean) => void;
+  setWidth: (width: number) => void;
 }
 
 const InitialState: DiagramSidePanelState = {
@@ -49,66 +57,83 @@ const DiagramSidePanelContext =
 export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState(InitialState);
 
-  const close = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      open: false,
-      mode: 'view',
-      expanded: false,
-    }));
-  }, []);
-
-  const showTab = useCallback((tab: DiagramSidePanelTab) => {
-    setState((prev) => ({
-      ...prev,
-      open: true,
-      tab,
-      mode: tab === 'environments' ? prev.mode : 'view',
-      expanded: tab === 'environments' ? prev.expanded : false,
-    }));
-  }, []);
-
-  const toggleTab = useCallback((tab: DiagramSidePanelTab) => {
-    setState((prev) => {
-      if (prev.open && prev.tab === tab) {
-        return {
-          ...prev,
-          open: false,
-          mode: 'view',
-          expanded: false,
-        };
-      }
-
-      return {
-        ...prev,
-        open: true,
-        tab,
-        mode: tab === 'environments' ? prev.mode : 'view',
-        expanded: tab === 'environments' ? prev.expanded : false,
-      };
-    });
-  }, []);
-
-  const openEnvironments = useCallback(
-    ({ environmentName, create = false }: OpenEnvironmentsOptions = {}) => {
-      setState((prev) => ({
-        ...prev,
-        open: true,
-        tab: 'environments',
-        selectedEnvironmentName: environmentName,
-        mode: create ? 'create' : 'view',
-        expanded: create,
-      }));
+  const leaveGuard = useRef<EnvironmentLeaveGuard | null>(null);
+  const setEnvironmentLeaveGuard = useCallback(
+    (guard: EnvironmentLeaveGuard | null) => {
+      leaveGuard.current = guard;
+    },
+    [],
+  );
+  const requestEnvironmentLeave = useCallback(
+    (proceed: () => void, hidingOnly = false) => {
+      if (leaveGuard.current) leaveGuard.current(proceed, hidingOnly);
+      else proceed();
     },
     [],
   );
 
-  const selectEnvironment = useCallback((name?: string) => {
-    setState((prev) => ({
-      ...prev,
-      selectedEnvironmentName: name,
-    }));
-  }, []);
+  const close = useCallback(
+    () =>
+      requestEnvironmentLeave(() => {
+        setState((prev) => ({
+          ...prev,
+          open: false,
+          mode: 'view',
+          expanded: false,
+        }));
+      }, true),
+    [requestEnvironmentLeave],
+  );
+
+  const showTab = useCallback(
+    (tab: DiagramSidePanelTab) => {
+      const show = () =>
+        setState((prev) => ({
+          ...prev,
+          open: true,
+          tab,
+          mode: tab === 'environments' ? prev.mode : 'view',
+          expanded: tab === 'environments' ? prev.expanded : false,
+        }));
+      if (tab === 'environments') show();
+      else requestEnvironmentLeave(show, true);
+    },
+    [requestEnvironmentLeave],
+  );
+
+  const toggleTab = useCallback(
+    (tab: DiagramSidePanelTab) => {
+      if (state.open && state.tab === tab) close();
+      else showTab(tab);
+    },
+    [close, showTab, state.open, state.tab],
+  );
+
+  const openEnvironments = useCallback(
+    ({ environmentName, create = false }: OpenEnvironmentsOptions = {}) => {
+      requestEnvironmentLeave(() =>
+        setState((prev) => ({
+          ...prev,
+          open: true,
+          tab: 'environments',
+          selectedEnvironmentName: environmentName,
+          mode: create ? 'create' : 'view',
+          expanded: create,
+          width: undefined,
+        })),
+      );
+    },
+    [requestEnvironmentLeave],
+  );
+
+  const selectEnvironment = useCallback(
+    (name?: string) => {
+      requestEnvironmentLeave(() =>
+        setState((prev) => ({ ...prev, selectedEnvironmentName: name })),
+      );
+    },
+    [requestEnvironmentLeave],
+  );
 
   const startEnvironmentCreate = useCallback(() => {
     setState((prev) => ({
@@ -118,6 +143,7 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       selectedEnvironmentName: undefined,
       mode: 'create',
       expanded: true,
+      width: undefined,
     }));
   }, []);
 
@@ -128,14 +154,17 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       tab: 'environments',
       mode: 'edit',
       expanded: true,
+      width: undefined,
     }));
   }, []);
 
   const finishEnvironmentEdit = useCallback(() => {
+    leaveGuard.current = null;
     setState((prev) => ({
       ...prev,
       mode: 'view',
       expanded: false,
+      width: undefined,
     }));
   }, []);
 
@@ -143,12 +172,20 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
     setState((prev) => ({
       ...prev,
       expanded,
+      width: undefined,
     }));
+  }, []);
+
+  const setWidth = useCallback((width: number) => {
+    setState((prev) => ({ ...prev, width }));
   }, []);
 
   const value = useMemo<DiagramSidePanelController>(
     () => ({
       state,
+      restoreState: setState,
+      setEnvironmentLeaveGuard,
+      requestEnvironmentLeave,
       close,
       showTab,
       toggleTab,
@@ -158,13 +195,17 @@ export function DiagramSidePanelProvider({ children }: PropsWithChildren) {
       startEnvironmentEdit,
       finishEnvironmentEdit,
       setExpanded,
+      setWidth,
     }),
     [
+      setEnvironmentLeaveGuard,
+      requestEnvironmentLeave,
       close,
       finishEnvironmentEdit,
       openEnvironments,
       selectEnvironment,
       setExpanded,
+      setWidth,
       showTab,
       startEnvironmentCreate,
       startEnvironmentEdit,

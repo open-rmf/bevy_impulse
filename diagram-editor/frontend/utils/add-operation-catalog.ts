@@ -1,5 +1,4 @@
 import type { NodeAddChange, XYPosition } from '@xyflow/react';
-import { v4 as uuidv4 } from 'uuid';
 import { getSchemaConfigDefaults } from '../forms/schema-config-form';
 import type { NodeManager } from '../node-manager';
 import {
@@ -103,25 +102,15 @@ function createNodeChange(
   op: DiagramOperation,
 ): NodeAddChange<DiagramEditorNode>[] {
   if (op.type === 'scope') {
-    return createScopeNode(
-      namespace,
-      parentId,
-      newNodePosition,
-      op,
-      uuidv4(),
-    ).map((node) => ({ type: 'add', item: node }));
+    return createScopeNode(namespace, parentId, newNodePosition, op).map(
+      (node) => ({ type: 'add', item: node }),
+    );
   }
 
   return [
     {
       type: 'add',
-      item: createOperationNode(
-        namespace,
-        parentId,
-        newNodePosition,
-        op,
-        uuidv4(),
-      ),
+      item: createOperationNode(namespace, parentId, newNodePosition, op),
     },
   ];
 }

@@ -1,6 +1,7 @@
 import {
   createContext,
   type PropsWithChildren,
+  type SetStateAction,
   useCallback,
   useContext,
   useMemo,
@@ -8,6 +9,7 @@ import {
 } from 'react';
 import {
   EMPTY_TRANSIENT_EDITOR_DRAFTS,
+  isScriptEnvironmentDraftDirty,
   type ScriptEnvironmentEditorDraft,
   type TemplateRenameDraft,
   type TransientEditorDrafts,
@@ -17,7 +19,7 @@ interface TransientEditorDraftContextValue {
   drafts: TransientEditorDrafts;
   replaceDrafts: (drafts: TransientEditorDrafts) => void;
   setScriptEnvironmentDraft: (
-    draft: ScriptEnvironmentEditorDraft | undefined,
+    draft: SetStateAction<ScriptEnvironmentEditorDraft | undefined>,
   ) => void;
   setOperationConfigDraft: (key: string, value: string | undefined) => void;
   clearOperationConfigDrafts: (keys: Iterable<string>) => void;
@@ -39,8 +41,12 @@ export function TransientEditorDraftProvider({ children }: PropsWithChildren) {
     [],
   );
   const setScriptEnvironmentDraft = useCallback(
-    (draft: ScriptEnvironmentEditorDraft | undefined) =>
-      setDrafts((prev) => ({ ...prev, scriptEnvironment: draft })),
+    (draft: SetStateAction<ScriptEnvironmentEditorDraft | undefined>) =>
+      setDrafts((prev) => ({
+        ...prev,
+        scriptEnvironment:
+          typeof draft === 'function' ? draft(prev.scriptEnvironment) : draft,
+      })),
     [],
   );
   const setOperationConfigDraft = useCallback(
@@ -97,7 +103,8 @@ export function TransientEditorDraftProvider({ children }: PropsWithChildren) {
       setTemplateRenameDraft,
       clearDrafts,
       hasUncommittedBuffers:
-        drafts.scriptEnvironment !== undefined ||
+        (drafts.scriptEnvironment !== undefined &&
+          isScriptEnvironmentDraftDirty(drafts.scriptEnvironment)) ||
         drafts.templateRename !== undefined ||
         Object.keys(drafts.operationConfigs).length > 0,
     }),

@@ -30,6 +30,7 @@ function ScriptForm(props: ScriptFormProps) {
     state: { open: panelOpen, tab: panelTab },
     close: closePanel,
     startEnvironmentCreate,
+    requestEnvironmentLeave,
   } = useDiagramSidePanel();
 
   // Track raw string of node config to support JSON editing
@@ -52,24 +53,25 @@ function ScriptForm(props: ScriptFormProps) {
     }
   }, [configValue]);
 
-  const handleEnvChange = (envName: string) => {
-    const updatedNode = {
-      ...props.node,
-      data: {
-        ...props.node.data,
-        op: {
-          ...props.node.data.op,
-          environment: envName,
+  const handleEnvChange = (envName: string) =>
+    requestEnvironmentLeave(() => {
+      const updatedNode = {
+        ...props.node,
+        data: {
+          ...props.node.data,
+          op: {
+            ...props.node.data.op,
+            environment: envName,
+          },
         },
-      },
-    };
-    props.onChange?.({
-      type: 'replace',
-      id: props.node.id,
-      item: updatedNode,
+      };
+      props.onChange?.({
+        type: 'replace',
+        id: props.node.id,
+        item: updatedNode,
+      });
+      openScriptEnvironment(envName, false);
     });
-    openScriptEnvironment(envName, false);
-  };
 
   // Real-time parse python entrypoint functions from selected environment
   const selectedEnvName = props.node.data.op.environment;
@@ -127,7 +129,7 @@ function ScriptForm(props: ScriptFormProps) {
           value={props.node.data.op.environment || ''}
           onChange={(e) => {
             if (e.target.value === CREATE_ENVIRONMENT_VALUE) {
-              startEnvironmentCreate();
+              requestEnvironmentLeave(startEnvironmentCreate);
               return;
             }
             handleEnvChange(e.target.value);

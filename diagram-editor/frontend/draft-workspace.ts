@@ -1,4 +1,7 @@
+import type { Viewport } from '@xyflow/react';
+import equal from 'fast-deep-equal';
 import type { DiagramProperties } from './diagram-properties-provider';
+import type { DiagramSidePanelState } from './diagram-side-panel-controller';
 import type { PersistedState } from './persist-state';
 import type { Diagram, SectionTemplate } from './types/api';
 
@@ -6,14 +9,37 @@ const DRAFT_KEY_PREFIX = 'crossflow-diagram-editor:draft:v1:';
 
 export interface ScriptEnvironmentEditorDraft {
   selectedEnvName: string;
+  nodeId?: string;
   mode: 'edit' | 'create';
   envName: string;
   builder: string;
   config: string;
-  scriptText: string;
   selectedCodeField: string;
-  language: string;
   isExpanded: boolean;
+  width?: number;
+  editor?: {
+    anchor: number;
+    head: number;
+    scrollTop: number;
+    scrollLeft: number;
+  };
+  initial?: { envName: string; builder: string; config: string };
+}
+
+export function isScriptEnvironmentDraftDirty(
+  draft: ScriptEnvironmentEditorDraft,
+): boolean {
+  if (!draft.initial) return true;
+  if (
+    draft.envName !== draft.initial.envName ||
+    draft.builder !== draft.initial.builder
+  )
+    return true;
+  try {
+    return !equal(JSON.parse(draft.config), JSON.parse(draft.initial.config));
+  } catch {
+    return draft.config !== draft.initial.config;
+  }
 }
 
 export interface TemplateRenameDraft {
@@ -44,6 +70,7 @@ export interface DraftWorkspaceContent {
   sourceExtensions?: Diagram['extensions'];
   filename: string | null;
   transientEditors: TransientEditorDrafts;
+  presentation?: { sidePanel: DiagramSidePanelState; viewport: Viewport };
 }
 
 export interface DraftWorkspaceV1 extends DraftWorkspaceContent {
@@ -79,9 +106,7 @@ function isScriptEnvironmentEditorDraft(
     isString(value.envName) &&
     isString(value.builder) &&
     isString(value.config) &&
-    isString(value.scriptText) &&
     isString(value.selectedCodeField) &&
-    isString(value.language) &&
     typeof value.isExpanded === 'boolean'
   );
 }
@@ -189,5 +214,21 @@ export function clearDraftWorkspace(
 export function draftWorkspaceFingerprint(
   content: DraftWorkspaceContent,
 ): string {
-  return JSON.stringify(content);
+  const { presentation: _presentation, transientEditors, ...diagram } = content;
+  const draft = transientEditors.scriptEnvironment;
+  return JSON.stringify({
+    ...diagram,
+    transientEditors: {
+      ...transientEditors,
+      scriptEnvironment:
+        draft && isScriptEnvironmentDraftDirty(draft)
+          ? {
+              mode: draft.mode,
+              envName: draft.envName,
+              builder: draft.builder,
+              config: draft.config,
+            }
+          : undefined,
+    },
+  });
 }

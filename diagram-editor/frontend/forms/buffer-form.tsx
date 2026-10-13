@@ -93,7 +93,6 @@ function BufferForm(props: BufferFormProps) {
       <TextField
         label="Display Text"
         value={op.display_text || ''}
-        helperText="Changes the label only; the operation ID stays the same."
         onChange={(ev) => {
           onChange?.({
             type: 'replace',

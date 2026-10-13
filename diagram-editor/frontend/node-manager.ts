@@ -4,6 +4,7 @@ import {
   type DiagramEditorNode,
   isBuiltinNode,
   isOperationNode,
+  START_ID,
   TERMINATE_ID,
 } from './nodes';
 import type { NextOperation } from './types/api';
@@ -25,7 +26,13 @@ export class NodeManager {
         );
         this.namespacedOpIdMap.set(namespacedOpId, node);
       } else if (isBuiltinNode(node)) {
-        this.namespacedOpIdMap.set(node.id, node);
+        this.namespacedOpIdMap.set(
+          joinNamespaces(
+            node.data.namespace,
+            node.type === 'start' ? START_ID : TERMINATE_ID,
+          ),
+          node,
+        );
       } else if (node.type === 'sectionOutput') {
         // This will conflict if there is an op in a template with the same id as an output.
         // However, this conflict exist in crossflow as well, so we assume that it will not happen.
@@ -88,7 +95,7 @@ export class NodeManager {
         case 'cancel':
           return null;
         case 'terminate':
-          return this.getNode(joinNamespaces(namespace, TERMINATE_ID));
+          return this.getNodeFromNamespaceOpId(namespace, TERMINATE_ID);
       }
     }
 

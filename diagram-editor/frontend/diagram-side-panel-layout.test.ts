@@ -8,7 +8,7 @@ describe('diagram side-panel layout', () => {
   test('uses the normal and expanded drawer widths when space permits', () => {
     expect(
       getDiagramSidePanelWidth(1440, { open: true, expanded: false }),
-    ).toBe(420);
+    ).toBe(480);
     expect(getDiagramSidePanelWidth(1440, { open: true, expanded: true })).toBe(
       900,
     );
@@ -27,7 +27,7 @@ describe('diagram side-panel layout', () => {
         viewportWidth: 1440,
         sidePanel: { open: true, expanded: false },
       }),
-    ).toEqual({ left: 584, top: 300 });
+    ).toEqual({ left: 524, top: 300 });
   });
 
   test('moves the editor farther left when the drawer expands', () => {

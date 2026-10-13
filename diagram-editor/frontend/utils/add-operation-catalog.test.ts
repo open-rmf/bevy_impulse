@@ -1,6 +1,7 @@
 import { NodeManager } from '../node-manager';
-import { createOperationNode } from '../nodes';
+import { createOperationNode, isOperationNode } from '../nodes';
 import {
+  ADD_OPERATION_DEFINITIONS,
   filterCompatibleAddOperations,
   getAddOperationCandidates,
   getRegistryNodeBuilderCandidates,
@@ -157,4 +158,26 @@ describe('add operation catalog', () => {
       ),
     ).toBe(true);
   });
+});
+
+test.each([
+  ['buffer', 'buffer'],
+  ['fork_clone', 'clone'],
+  ['fork_result', 'result'],
+  ['scope', 'scope'],
+])('new %s operations have readable default IDs', (key, prefix) => {
+  const candidate = ADD_OPERATION_DEFINITIONS.find(
+    (entry) => entry.key === key,
+  )!;
+  const [change] = candidate.createChanges({
+    namespace: ROOT_NAMESPACE,
+    parentId: undefined,
+    newNodePosition: { x: 0, y: 0 },
+    nodeManager: new NodeManager([]),
+  });
+  expect(change.item.data.opId).toMatch(new RegExp(`^${prefix}_[A-Z0-9]{6}$`));
+  expect(
+    isOperationNode(change.item) &&
+      change.item.data.op.extensions?.['crossflow-auto-id'],
+  ).toBe(true);
 });

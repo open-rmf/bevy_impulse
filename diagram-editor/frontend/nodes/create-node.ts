@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { DiagramOperation, NextOperation } from '../types/api';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from '../utils/layout';
 import { joinNamespaces } from '../utils/namespace';
+import { generateOperationId } from '../utils/operation-id';
 import {
   type DiagramEditorNode,
   type OperationNode,
@@ -19,7 +20,6 @@ export function createStartNode(
   position: XYPosition,
 ): DiagramEditorNode {
   return {
-    // NOTE: atm `NodeManager` relies on how the id of builtin nodes is computed to locate them.
     id: joinNamespaces(namespace, START_ID),
     type: 'start',
     position,
@@ -33,7 +33,6 @@ export function createTerminateNode(
   position: XYPosition,
 ): DiagramEditorNode {
   return {
-    // NOTE: atm `NodeManager` relies on how the id of builtin nodes is computed to locate them.
     id: joinNamespaces(namespace, TERMINATE_ID),
     type: 'terminate',
     position,
@@ -98,8 +97,12 @@ export function createOperationNode<
   parentId: string | undefined,
   position: XYPosition,
   op: DiagramOperation & { type: NodeType },
-  opId: string,
+  opId?: string,
 ): OperationNode<NodeType> {
+  if (opId === undefined) {
+    opId = generateOperationId(op);
+    op = { ...op, extensions: { ...op.extensions, 'crossflow-auto-id': true } };
+  }
   return {
     id: uuidv4(),
     type: op.type,
@@ -118,12 +121,16 @@ export function createScopeNode(
   parentId: string | undefined,
   position: XYPosition,
   op: DiagramOperation & { type: 'scope' },
-  opId: string,
+  opId?: string,
 ): [OperationNode<'scope'>, ...DiagramEditorNode[]] {
+  if (opId === undefined) {
+    opId = generateOperationId(op);
+    op = { ...op, extensions: { ...op.extensions, 'crossflow-auto-id': true } };
+  }
   const scopeId = uuidv4();
   const children: DiagramEditorNode[] = [
     {
-      id: joinNamespaces(namespace, opId, START_ID),
+      id: joinNamespaces(namespace, scopeId, START_ID),
       type: 'start',
       position: {
         x: LAYOUT_OPTIONS.scopePadding.leftRight,
@@ -135,7 +142,7 @@ export function createScopeNode(
       parentId: scopeId,
     },
     {
-      id: joinNamespaces(namespace, opId, TERMINATE_ID),
+      id: joinNamespaces(namespace, scopeId, TERMINATE_ID),
       type: 'terminate',
       position: {
         x: LAYOUT_OPTIONS.scopePadding.leftRight,

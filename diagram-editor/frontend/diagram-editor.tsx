@@ -30,6 +30,7 @@ import {
   ReactFlow,
   type ReactFlowInstance,
   reconnectEdge,
+  type Viewport,
   type XYPosition,
 } from '@xyflow/react';
 import { inflateSync, strFromU8 } from 'fflate';
@@ -117,6 +118,7 @@ import {
   loadTemplate,
 } from './utils/load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
+import { updateOperationIds } from './utils/operation-id';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -243,25 +245,9 @@ function getInteractionNodeId(
   operationId: string,
   nodeManager: NodeManager,
 ): string | null {
-  const normalizedId = operationId.startsWith(':')
-    ? operationId.slice(1)
-    : operationId;
-
-  if (normalizedId === '(terminate)') {
-    return (
-      nodeManager.tryGetNode(joinNamespaces(ROOT_NAMESPACE, TERMINATE_ID))
-        ?.id ?? null
-    );
-  }
-
-  if (normalizedId.endsWith(':(terminate)')) {
-    const namespace = normalizedId.slice(0, -':(terminate)'.length);
-    return (
-      nodeManager.tryGetNode(
-        joinNamespaces(ROOT_NAMESPACE, namespace, TERMINATE_ID),
-      )?.id ?? null
-    );
-  }
+  const normalizedId = (
+    operationId.startsWith(':') ? operationId.slice(1) : operationId
+  ).replace(/(^|:)\(terminate\)$/, `$1${TERMINATE_ID}`);
 
   if (normalizedId.startsWith('(') || normalizedId.includes(':(exposed):')) {
     return null;
@@ -427,12 +413,22 @@ function DiagramEditor() {
   } = useTransientEditorDrafts();
   const openScriptEnvironment = useScriptEnvironmentNavigation();
   const {
-    state: {
-      open: sidePanelOpen,
-      expanded: sidePanelExpanded,
-      tab: sidePanelTab,
-    },
+    state: sidePanelState,
+    restoreState: restoreSidePanel,
+    finishEnvironmentEdit,
+    requestEnvironmentLeave,
   } = useDiagramSidePanel();
+  const {
+    open: sidePanelOpen,
+    expanded: sidePanelExpanded,
+    width: sidePanelWidth,
+    tab: sidePanelTab,
+  } = sidePanelState;
+  const [viewport, setViewport] = React.useState<Viewport>({
+    x: 0,
+    y: 0,
+    zoom: 1,
+  });
 
   const updateEditorModeAction = React.useCallback(
     (newMode: EditorModeContext) => {
@@ -503,6 +499,7 @@ function DiagramEditor() {
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
+      changes = updateOperationIds(changes, nodeManager.nodes);
       const transitiveChanges: NodeChange<DiagramEditorNode>[] = [];
 
       // resize and reposition scope
@@ -709,7 +706,10 @@ function DiagramEditor() {
   const scriptNodeBinding = React.useMemo<
     ScriptNodeEnvironmentBinding | undefined
   >(() => {
-    const nodeId = editingNodeId || pendingScriptEnvironmentNodeId;
+    const nodeId =
+      transientEditorDrafts.scriptEnvironment?.nodeId ||
+      editingNodeId ||
+      pendingScriptEnvironmentNodeId;
     const node = nodeId ? nodeManager.tryGetNode(nodeId) : undefined;
     if (!node || node.type !== 'script') {
       return undefined;
@@ -717,6 +717,7 @@ function DiagramEditor() {
 
     const environmentName = node.data.op.environment;
     return {
+      nodeId: node.id,
       environmentName:
         typeof environmentName === 'string'
           ? environmentName || undefined
@@ -744,7 +745,20 @@ function DiagramEditor() {
     handleNodeChange,
     nodeManager,
     pendingScriptEnvironmentNodeId,
+    transientEditorDrafts.scriptEnvironment?.nodeId,
   ]);
+
+  const openAddedScriptEnvironment = (node: DiagramEditorNode | null) => {
+    if (node?.type !== 'script') return;
+    requestEnvironmentLeave(() => {
+      const environment = node.data.op.environment;
+      openScriptEnvironment(
+        typeof environment === 'string' ? environment || undefined : undefined,
+        true,
+      );
+      setPendingScriptEnvironmentNodeId(node.id);
+    });
+  };
 
   const [editingEdgeId, setEditingEdgeId] = React.useState<string | null>(null);
   const editingEdge: EditingEdge | null = (() => {
@@ -907,6 +921,7 @@ function DiagramEditor() {
       setTemplates(diagram.templates || {});
       setRecentlyUsedFilename(filename);
       clearTransientEditorDrafts();
+      finishEnvironmentEdit();
       closeAllPopovers();
       markCleanOnNextSnapshot.current = true;
       setHydrationResolved(true);
@@ -917,6 +932,7 @@ function DiagramEditor() {
       clearInteractionVisualization,
       clearStoredDraft,
       clearTransientEditorDrafts,
+      finishEnvironmentEdit,
       closeAllPopovers,
       setDiagramProperties,
     ],
@@ -1022,6 +1038,7 @@ function DiagramEditor() {
         : undefined,
       filename: recentlyUsedFilename,
       transientEditors: cloneSerializable(transientEditorDrafts),
+      presentation: { sidePanel: sidePanelState, viewport },
     };
   }, [
     diagramProperties,
@@ -1032,6 +1049,8 @@ function DiagramEditor() {
     recentlyUsedFilename,
     templates,
     transientEditorDrafts,
+    sidePanelState,
+    viewport,
   ]);
 
   const persistLatestDraft = React.useCallback(() => {
@@ -1110,6 +1129,7 @@ function DiagramEditor() {
     setLoadContext(null);
     setRecentlyUsedFilename(null);
     clearTransientEditorDrafts();
+    finishEnvironmentEdit();
     markCleanOnNextSnapshot.current = true;
     setHydrationResolved(true);
     clearStoredDraft();
@@ -1118,6 +1138,7 @@ function DiagramEditor() {
     clearInteractionVisualization,
     clearStoredDraft,
     clearTransientEditorDrafts,
+    finishEnvironmentEdit,
     closeAllPopovers,
     setDiagramProperties,
   ]);
@@ -1153,6 +1174,19 @@ function DiagramEditor() {
     setDiagramProperties(cloneSerializable(draft.diagramProperties));
     setRecentlyUsedFilename(draft.filename);
     replaceTransientEditorDrafts(cloneSerializable(draft.transientEditors));
+    const environmentDraft = draft.transientEditors.scriptEnvironment;
+    if (environmentDraft) {
+      restoreSidePanel({
+        ...draft.presentation?.sidePanel,
+        open: true,
+        tab: 'environments',
+        selectedEnvironmentName: environmentDraft.selectedEnvName,
+        mode: environmentDraft.mode,
+        expanded: environmentDraft.isExpanded,
+        width: environmentDraft.width,
+      });
+    } else if (draft.presentation)
+      restoreSidePanel(draft.presentation.sidePanel);
     const restoredDiagram: Diagram = {
       version: '0.1.0',
       start: { builtin: 'dispose' },
@@ -1169,8 +1203,18 @@ function DiagramEditor() {
     setIsDirty(true);
     setHydrationResolved(true);
     setRecoveryCandidate(null);
-    requestAnimationFrame(() => reactFlowInstance.current?.fitView());
-  }, [recoveryCandidate, replaceTransientEditorDrafts, setDiagramProperties]);
+    requestAnimationFrame(() => {
+      if (draft.presentation) {
+        reactFlowInstance.current?.setViewport(draft.presentation.viewport);
+        setViewport(draft.presentation.viewport);
+      } else reactFlowInstance.current?.fitView();
+    });
+  }, [
+    recoveryCandidate,
+    replaceTransientEditorDrafts,
+    setDiagramProperties,
+    restoreSidePanel,
+  ]);
 
   const discardRecoveryDraft = React.useCallback(() => {
     if (!recoveryCandidate) {
@@ -1191,6 +1235,7 @@ function DiagramEditor() {
     setLoadContext(null);
     setRecentlyUsedFilename(null);
     clearTransientEditorDrafts();
+    finishEnvironmentEdit();
     baselineFingerprint.current = null;
     markCleanOnNextSnapshot.current = true;
     setHydrationResolved(true);
@@ -1198,6 +1243,7 @@ function DiagramEditor() {
     applyPreparedDiagram,
     clearStoredDraft,
     clearTransientEditorDrafts,
+    finishEnvironmentEdit,
     recoveryCandidate,
     setDiagramProperties,
   ]);
@@ -1244,6 +1290,7 @@ function DiagramEditor() {
       compatibility={compatibility}
     >
       <ReactFlow
+        onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
         nodes={nodes}
         edges={displayEdges}
         fitView
@@ -1422,32 +1469,36 @@ function DiagramEditor() {
         }}
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
-          closeAllPopovers();
+          const nodeRect = ev.currentTarget.getBoundingClientRect();
+          requestEnvironmentLeave(() => {
+            closeAllPopovers();
 
-          if (isBuiltinNode(node)) {
-            return;
-          }
-          if (node.type === 'script') {
-            const environmentName = node.data.op.environment;
-            openScriptEnvironment(
-              typeof environmentName === 'string'
-                ? environmentName || undefined
-                : undefined,
-              false,
-            );
-          }
-          setEditingNodeId(node.id);
-          setEditOpFormPopoverProps({
-            open: true,
-            anchorReference: 'anchorPosition',
-            anchorPosition: getEditPopoverPositionForNode({
-              nodeRect: ev.currentTarget.getBoundingClientRect(),
-              viewportWidth: window.innerWidth,
-              sidePanel: {
-                open: sidePanelOpen,
-                expanded: sidePanelExpanded,
-              },
-            }),
+            if (isBuiltinNode(node)) {
+              return;
+            }
+            if (node.type === 'script') {
+              const environmentName = node.data.op.environment;
+              openScriptEnvironment(
+                typeof environmentName === 'string'
+                  ? environmentName || undefined
+                  : undefined,
+                false,
+              );
+            }
+            setEditingNodeId(node.id);
+            setEditOpFormPopoverProps({
+              open: true,
+              anchorReference: 'anchorPosition',
+              anchorPosition: getEditPopoverPositionForNode({
+                nodeRect,
+                viewportWidth: window.innerWidth,
+                sidePanel: {
+                  open: sidePanelOpen,
+                  expanded: sidePanelExpanded,
+                  width: sidePanelWidth,
+                },
+              }),
+            });
           });
         }}
         onEdgeClick={(ev, edge) => {
@@ -1600,16 +1651,7 @@ function DiagramEditor() {
                 handleNodeChanges(changes);
                 setEdges((prev) => addEdge(newEdge, prev));
                 closeAllPopovers();
-                if (targetNode.type === 'script') {
-                  const environmentName = targetNode.data.op.environment;
-                  openScriptEnvironment(
-                    typeof environmentName === 'string'
-                      ? environmentName || undefined
-                      : undefined,
-                    true,
-                  );
-                  setPendingScriptEnvironmentNodeId(targetNode.id);
-                }
+                openAddedScriptEnvironment(targetNode);
               }}
             />
           ) : (
@@ -1622,16 +1664,7 @@ function DiagramEditor() {
                   changes.find((change) => change.item.id === primaryNodeId)
                     ?.item || null;
                 closeAllPopovers();
-                if (primaryNode?.type === 'script') {
-                  const environmentName = primaryNode.data.op.environment;
-                  openScriptEnvironment(
-                    typeof environmentName === 'string'
-                      ? environmentName || undefined
-                      : undefined,
-                    true,
-                  );
-                  setPendingScriptEnvironmentNodeId(primaryNode.id);
-                }
+                openAddedScriptEnvironment(primaryNode);
               }}
             />
           )}
