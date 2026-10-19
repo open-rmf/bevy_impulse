@@ -12,8 +12,9 @@ mod frontend {
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use tar::Builder;
+    use flate2::read::GzDecoder;
 
-    fn build_pnpm<P: AsRef<Path>>(out_dir: P) {
+    fn build_pnpm<W: std::io::Write>(make_encoding: impl FnOnce() -> W) {
         println!("cargo:rerun-if-changed=package.json");
         println!("cargo:rerun-if-changed=../pnpm-lock.yaml");
         println!("cargo:rerun-if-changed=rsbuild.config.ts");
@@ -39,13 +40,9 @@ mod frontend {
         }
 
         let dist_dir_path = "dist";
-        let output_tar_gz_path = out_dir.as_ref().join("dist.tar.gz");
 
         if Path::new(dist_dir_path).exists() {
-            let tar_gz_file =
-                File::create(&output_tar_gz_path).expect("Failed to create output tar.gz file");
-            let enc = GzEncoder::new(tar_gz_file, Compression::default());
-            let mut tar_builder = Builder::new(enc);
+            let mut tar_builder = Builder::new(make_encoding());
             tar_builder.mode(tar::HeaderMode::Deterministic);
 
             let mut paths_to_archive: Vec<PathBuf> = Vec::new();
@@ -68,8 +65,8 @@ mod frontend {
             }
             tar_builder.finish().expect("Failed to finish tar archive");
             println!(
-                "Successfully compressed '{}' into '{:?}'",
-                dist_dir_path, output_tar_gz_path
+                "Successfully compressed '{}'",
+                dist_dir_path,
             );
         } else {
             panic!(
@@ -79,10 +76,37 @@ mod frontend {
         }
     }
 
+    /// Used to save a compressed version of the built frontend for caching in
+    /// git and embedding into an executor binary so it can be used by downstream
+    /// crates without needing any locally installed pnpm machinery.
+    fn build_compressed_pnpm<P: AsRef<Path>>(out_dir: P) {
+        build_pnpm(
+            move || {
+                let output_tar_gz_path = out_dir.as_ref().join("dist.tar.gz");
+                let tar_gz_file = File::create(output_tar_gz_path).expect("Failed to create output file for dist.tar.gz");
+                GzEncoder::new(tar_gz_file, Compression::default())
+            }
+        );
+    }
+
+    /// Use to create an uncompressed version of the built frontend to check it
+    /// against the cached blob. This allows us to detect changes to the frontend
+    /// that would require us to recompile the crossflow-diagram-editor. We test
+    /// against an uncompressed version to avoid the problem reported here:
+    /// https://github.com/open-rmf/crossflow/issues/233
+    fn build_uncompressed_pnpm<P: AsRef<Path>>(out_dir: P) {
+        build_pnpm(
+            move || {
+                let output_tar_path = out_dir.as_ref().join("dist.tar");
+                File::create(output_tar_path).expect("Failed to create output file for dist.tar")
+            }
+        );
+    }
+
     pub fn build_frontend() {
         // We put the output in `CARGO_MANIFEST_DIR` instead of `OUT_DIR` because we want to include
         // it in the crate.
-        build_pnpm(PathBuf::from(
+        build_compressed_pnpm(PathBuf::from(
             std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"),
         ));
     }
@@ -94,12 +118,12 @@ mod frontend {
             "Failed to open {}",
             current_dist_path.to_str().unwrap()
         ));
-        let current_dist = BufReader::new(current_dist);
+        let current_dist = BufReader::new(GzDecoder::new(current_dist));
 
         let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
-        build_pnpm(Path::new(&out_dir));
+        build_uncompressed_pnpm(Path::new(&out_dir));
 
-        let new_dist_path = Path::new(&out_dir).join("dist.tar.gz");
+        let new_dist_path = Path::new(&out_dir).join("dist.tar");
         let new_dist = File::open(&new_dist_path).expect(&format!(
             "Failed to open {}",
             new_dist_path.to_str().unwrap()
