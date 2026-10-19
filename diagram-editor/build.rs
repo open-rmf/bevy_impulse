@@ -6,13 +6,13 @@
 
 #[cfg(feature = "frontend")]
 mod frontend {
+    use flate2::read::GzDecoder;
     use flate2::{Compression, write::GzEncoder};
     use std::fs::File;
     use std::io::{BufReader, Read};
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use tar::Builder;
-    use flate2::read::GzDecoder;
 
     fn build_pnpm<W: std::io::Write>(make_encoding: impl FnOnce() -> W) {
         println!("cargo:rerun-if-changed=package.json");
@@ -64,10 +64,7 @@ mod frontend {
                     .expect("Failed to add file to tar archive");
             }
             tar_builder.finish().expect("Failed to finish tar archive");
-            println!(
-                "Successfully compressed '{}'",
-                dist_dir_path,
-            );
+            println!("Successfully compressed '{}'", dist_dir_path,);
         } else {
             panic!(
                 "Directory '{}' not found after pnpm build. Frontend build might have failed.",
@@ -80,13 +77,12 @@ mod frontend {
     /// git and embedding into an executor binary so it can be used by downstream
     /// crates without needing any locally installed pnpm machinery.
     fn build_compressed_pnpm<P: AsRef<Path>>(out_dir: P) {
-        build_pnpm(
-            move || {
-                let output_tar_gz_path = out_dir.as_ref().join("dist.tar.gz");
-                let tar_gz_file = File::create(output_tar_gz_path).expect("Failed to create output file for dist.tar.gz");
-                GzEncoder::new(tar_gz_file, Compression::default())
-            }
-        );
+        build_pnpm(move || {
+            let output_tar_gz_path = out_dir.as_ref().join("dist.tar.gz");
+            let tar_gz_file = File::create(output_tar_gz_path)
+                .expect("Failed to create output file for dist.tar.gz");
+            GzEncoder::new(tar_gz_file, Compression::default())
+        });
     }
 
     /// Use to create an uncompressed version of the built frontend to check it
@@ -95,12 +91,10 @@ mod frontend {
     /// against an uncompressed version to avoid the problem reported here:
     /// https://github.com/open-rmf/crossflow/issues/233
     fn build_uncompressed_pnpm<P: AsRef<Path>>(out_dir: P) {
-        build_pnpm(
-            move || {
-                let output_tar_path = out_dir.as_ref().join("dist.tar");
-                File::create(output_tar_path).expect("Failed to create output file for dist.tar")
-            }
-        );
+        build_pnpm(move || {
+            let output_tar_path = out_dir.as_ref().join("dist.tar");
+            File::create(output_tar_path).expect("Failed to create output file for dist.tar")
+        });
     }
 
     pub fn build_frontend() {
